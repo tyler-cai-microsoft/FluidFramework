@@ -37,11 +37,12 @@ parameters:
 
 - name: poolCG
   type: object
-  default: Lite
+  default:
+    vmImage: ubuntu-latest
 
 - name: poolBuild
   type: object
-  default: Lite
+  default: Test
 
 - name: preCG
   type: stepList

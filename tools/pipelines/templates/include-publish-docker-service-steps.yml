@@ -9,7 +9,7 @@ parameters:
 
 - name: pool
   type: object
-  default: Lite
+  default: Test
 
 - name: containerRegistry
   type: string
