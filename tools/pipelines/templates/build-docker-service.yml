@@ -60,7 +60,7 @@ parameters:
 
 - name: pool
   type: string
-  default: Test
+  default: Test2
 
 trigger: none
 

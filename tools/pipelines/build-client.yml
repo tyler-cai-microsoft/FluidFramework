@@ -80,7 +80,7 @@ extends:
     nonScopedPackages: ${{ parameters.nonScopedPackages }}
     buildDirectory: .
     tagName: client
-    poolBuild: Test
+    poolBuild: Test2
     cgSubDirectory: packages
     checkoutSubmodules: true
     taskBundleAnalysis: true

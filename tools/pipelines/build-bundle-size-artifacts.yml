@@ -42,7 +42,7 @@ extends:
     taskBuildDocs: false
     buildDirectory: .
     tagName: bundle-artifacts
-    poolBuild: Test
+    poolBuild: Test2
     checkoutSubmodules: true
     releaseBuildOverride: none
     publishOverride: default

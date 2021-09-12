@@ -42,7 +42,7 @@ parameters:
 
 - name: poolBuild
   type: object
-  default: Test
+  default: Test2
 
 - name: preCG
   type: stepList

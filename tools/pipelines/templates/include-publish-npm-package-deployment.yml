@@ -22,7 +22,7 @@ parameters:
 
 - name: pool
   type: object
-  default: Test
+  default: Test2
 
 - name: publishFlags
   type: string
