@@ -18,7 +18,6 @@ Usage: fluid-layer-check <options>
 Options:
      --dot <path>     Generate *.dot for GraphViz
      --info <path>    Path to the layer graph json file
-     --md             Generate PACKAGES.md file for human consumption
 ${commonOptionString}
 `);
 }
@@ -26,7 +25,6 @@ ${commonOptionString}
 const packagesMdFileName: string = "PACKAGES.md";
 
 let dotGraphFilePath: string | undefined;
-let writePackagesMd: boolean = false;
 let layerInfoPath: string | undefined;
 
 function parseOptions(argv: string[]) {
@@ -57,11 +55,6 @@ function parseOptions(argv: string[]) {
             console.error("ERROR: Missing argument for --dot");
             error = true;
             break;
-        }
-
-        if (arg === "--md") {
-            writePackagesMd = true;
-            continue;
         }
 
         if (arg === "--info") {
@@ -100,10 +93,9 @@ async function main() {
         const layerGraph = LayerGraph.load(resolvedRoot, packages, layerInfoPath);
 
         // Write human-readable package list organized by layer
-        if (writePackagesMd) {
-            const packagesMdFilePath: string = path.join(resolvedRoot, "docs", packagesMdFileName);
-            await writeFileAsync(packagesMdFilePath, layerGraph.generatePackageLayersMarkdown(resolvedRoot));
-        }
+        const packagesMdFilePath: string = path.join(resolvedRoot, "docs", packagesMdFileName);
+        await writeFileAsync(packagesMdFilePath, layerGraph.generatePackageLayersMarkdown(resolvedRoot));
+        console.log("test");
 
         // Write machine-readable dot file used to render a dependency graph
         if (dotGraphFilePath !== undefined) {
