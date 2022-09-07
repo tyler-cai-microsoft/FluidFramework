@@ -13,7 +13,9 @@ import { IFluidHandle, IRequest } from "@fluidframework/core-interfaces";
 import { ITestObjectProvider } from "@fluidframework/test-utils";
 import { describeNoCompat } from "@fluidframework/test-version-utils";
 import {
+    DefaultSummaryConfiguration,
     IContainerRuntimeOptions,
+    ISummaryConfigurationHeuristics,
 } from "@fluidframework/container-runtime";
 import { IContainerRuntimeBase } from "@fluidframework/runtime-definitions";
 import { requestFluidObject } from "@fluidframework/runtime-utils";
@@ -40,23 +42,11 @@ describeNoCompat("GC Sweep tests", (getTestObjectProvider) => {
     let provider: ITestObjectProvider;
 
     // Summaries should run automatically
+    const summaryHeuristics = (DefaultSummaryConfiguration as ISummaryConfigurationHeuristics);
+    summaryHeuristics.maxAckWaitTime = 2 * 60 * 1000; // 2 mins so it's shorter than inactiveObjectX
     const runtimeOptions: IContainerRuntimeOptions = {
         summaryOptions: {
-            summaryConfigOverrides: {
-                state: "enabled",
-                initialSummarizerDelayMs: 0,
-                summarizerClientElection: true,
-                maxAckWaitTime: 5000,
-                maxOpsSinceLastSummary: 100,
-                idleTime: 100,
-                minIdleTime: 0,
-                maxIdleTime: 300,
-                maxTime: 4000,
-                maxOps: 100,
-                minOpsForLastSummaryAttempt: 1,
-                runtimeOpWeight: 1,
-                nonRuntimeOpWeight: 1,
-            },
+            summaryConfigOverrides: summaryHeuristics,
         },
         gcOptions: {
             gcAllowed: true,
@@ -75,7 +65,7 @@ describeNoCompat("GC Sweep tests", (getTestObjectProvider) => {
     );
 
     // const sessionExpiryDurationMs = 3000; // 3 seconds
-    const inactiveTimeoutMs = 3000; // 3 seconds
+    const inactiveTimeoutMs = 6 * 60 * 1000; // 6 minutes
 
     // Set settings here, may be useful to put everything in the mockConfigProvider
     const settings = {
@@ -90,13 +80,13 @@ describeNoCompat("GC Sweep tests", (getTestObjectProvider) => {
     const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
     // Time spent to run the test. Currently 10 seconds, for better coverage increase this number.
-    const testTime = 10 * 1000;
+    const testTime = 3 * 60 * 60 * 1000; // 3 hours
 
     // Currently for GC Sweep testing only, run with npm run test. Should not be running in CI
     // Note: can run with npm run test:build to build and run the test
     // TODO: have this configurable via mocha cmd arguments
     // TODO: setup test to run in CI
-    const numberOfTests = 10;
+    const numberOfTests = 1;
     for (let i = 0; i < numberOfTests; i++) {
         const seed = Math.random();
         const random: IRandom = makeRandom(seed);
