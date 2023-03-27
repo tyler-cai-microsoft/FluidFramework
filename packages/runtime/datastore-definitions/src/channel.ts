@@ -62,6 +62,15 @@ export interface IChannel extends IFluidLoadable {
 		telemetryContext?: ITelemetryContext,
 	): Promise<ISummaryTreeWithStats>;
 
+	summarize2?(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
+	): Promise<ISummaryTreeWithStats>;
+
 	/**
 	 * Checks if the channel is attached to storage.
 	 * @returns True iff the channel is attached.

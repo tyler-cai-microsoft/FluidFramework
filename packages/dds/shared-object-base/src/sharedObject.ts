@@ -592,6 +592,14 @@ export abstract class SharedObject<
 	 * The serializer to use to serialize / parse handles, if any.
 	 */
 	private readonly _serializer: IFluidSerializer;
+	summarize2?: (
+		fullTree: boolean | undefined,
+		trackState: boolean | undefined,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
+	) => Promise<ISummaryTreeWithStats>;
 
 	protected get serializer(): IFluidSerializer {
 		/**
@@ -625,6 +633,17 @@ export abstract class SharedObject<
 			this.runtime.channelsRoutingContext,
 			(handle: IFluidHandle) => this.handleDecoded(handle),
 		);
+
+		this.summarize2 = async (
+			fullTree: boolean = false,
+			trackState: boolean = false,
+			telemetryContext: ITelemetryContext,
+			previousSequenceNumber: number,
+			currentSequenceNumber: number,
+			path: string,
+		) => {
+			return this.summarize(fullTree, trackState, telemetryContext);
+		};
 	}
 
 	/**

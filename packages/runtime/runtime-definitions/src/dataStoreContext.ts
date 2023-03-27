@@ -288,6 +288,15 @@ export interface IFluidDataStoreChannel extends IFluidRouter, IDisposable {
 		telemetryContext?: ITelemetryContext,
 	): Promise<ISummaryTreeWithStats>;
 
+	summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
+	): Promise<ISummaryTreeWithStats>;
+
 	/**
 	 * Returns the data used for garbage collection. This includes a list of GC nodes that represent this context
 	 * including any of its children. Each node has a list of outbound routes to other GC nodes in the document.

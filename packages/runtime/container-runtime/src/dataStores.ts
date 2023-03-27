@@ -646,6 +646,44 @@ export class DataStores implements IDisposable {
 		return summaryBuilder.getSummaryTree();
 	}
 
+	public async summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		parentPath: string,
+	) {
+		const path = `${parentPath}/${channelsTreeName}`;
+		const summaryBuilder = new SummaryTreeBuilder();
+		// Iterate over each store and ask it to snapshot
+		await Promise.all(
+			Array.from(this.contexts)
+				.filter(([_, context]) => {
+					// Summarizer works only with clients with no local changes. A data store in attaching
+					// state indicates an op was sent to attach a local data store.
+					assert(
+						context.attachState !== AttachState.Attaching,
+						"Local data store detected in attaching state during summarize",
+					);
+					return context.attachState === AttachState.Attached;
+				})
+				.map(async ([contextId, context]) => {
+					const contextSummary = await context.summarize2(
+						fullTree,
+						trackState,
+						telemetryContext,
+						previousSequenceNumber,
+						currentSequenceNumber,
+						path,
+					);
+					summaryBuilder.addWithStats(contextId, contextSummary);
+				}),
+		);
+
+		return summaryBuilder.getSummaryTree();
+	}
+
 	public createSummary(telemetryContext?: ITelemetryContext): ISummaryTreeWithStats {
 		const builder = new SummaryTreeBuilder();
 		// Attaching graph of some stores can cause other stores to get bound too.

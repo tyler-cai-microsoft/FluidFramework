@@ -120,6 +120,8 @@ export class FluidDataStoreRuntime extends TypedEventEmitter<IFluidDataStoreRunt
     // (undocumented)
     submitSignal(type: string, content: any): void;
     summarize(fullTree?: boolean, trackState?: boolean, telemetryContext?: ITelemetryContext): Promise<ISummaryTreeWithStats>;
+    // (undocumented)
+    summarize2(fullTree: boolean | undefined, trackState: boolean | undefined, telemetryContext: ITelemetryContext, previousSequenceNumber: number, currentSequenceNumber: number, parentPath: string): Promise<ISummaryTreeWithStats>;
     updateUsedRoutes(usedRoutes: string[]): void;
     // (undocumented)
     uploadBlob(blob: ArrayBufferLike): Promise<IFluidHandle<ArrayBufferLike>>;

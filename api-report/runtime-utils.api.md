@@ -51,6 +51,17 @@ export function addTreeToSummary(summary: ISummaryTreeWithStats, key: string, su
 // @public (undocumented)
 export function calculateStats(summary: SummaryObject): ISummaryStats;
 
+// @public (undocumented)
+export class ChangeNode {
+    constructor(_changeSequenceNumber: number);
+    // (undocumented)
+    generateSummaryHandle(fullTree: boolean, referenceSequenceNumber: number, path: string): Promise<ISummarizeResult>;
+    // (undocumented)
+    hasChanged(referenceSequenceNumber: number): boolean;
+    // (undocumented)
+    invalidate(sequenceNumber: number): void;
+}
+
 // @public
 export function convertSnapshotTreeToSummaryTree(snapshot: ISnapshotTree): ISummaryTreeWithStats;
 

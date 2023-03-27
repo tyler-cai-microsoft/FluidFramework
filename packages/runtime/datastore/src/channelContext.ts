@@ -33,6 +33,15 @@ export interface IChannelContext {
 		telemetryContext?: ITelemetryContext,
 	): Promise<ISummarizeResult>;
 
+	summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		fullPath: string,
+	): Promise<ISummarizeResult>;
+
 	reSubmit(content: any, localOpMetadata: unknown): void;
 
 	applyStashedOp(content: any): unknown;

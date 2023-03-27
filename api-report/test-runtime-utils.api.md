@@ -44,6 +44,7 @@ import { ISignalMessage } from '@fluidframework/protocol-definitions';
 import { ISnapshotTree } from '@fluidframework/protocol-definitions';
 import { ISummaryTree } from '@fluidframework/protocol-definitions';
 import { ISummaryTreeWithStats } from '@fluidframework/runtime-definitions';
+import { ITelemetryContext } from '@fluidframework/runtime-definitions';
 import { ITelemetryLogger } from '@fluidframework/common-definitions';
 import { ITokenProvider } from '@fluidframework/routerlicious-driver';
 import { ITokenResponse } from '@fluidframework/routerlicious-driver';
@@ -458,6 +459,8 @@ export class MockFluidDataStoreRuntime extends EventEmitter implements IFluidDat
     submitSignal(type: string, content: any): null;
     // (undocumented)
     summarize(fullTree?: boolean, trackState?: boolean): Promise<ISummaryTreeWithStats>;
+    // (undocumented)
+    summarize2(fullTree: boolean, trackState: boolean, telemetryContext: ITelemetryContext, previousSequenceNumber: number, currentSequenceNumber: number, path: string): Promise<ISummaryTreeWithStats>;
     // (undocumented)
     updateMinSequenceNumber(value: number): void;
     // (undocumented)

@@ -80,6 +80,7 @@ describeNoCompat("GC unreferenced timestamp", (getTestObjectProvider) => {
 			// Validate that the new data store does not have unreferenced timestamp.
 			await provider.ensureSynchronized();
 			const summaryResult1 = await summarizeNow(summarizer);
+			console.log(JSON.stringify(summaryResult1.summaryTree));
 			const timestamps1 = await getUnreferencedTimestamps(summaryResult1.summaryTree);
 			const dsBTimestamp1 = timestamps1.get(dataStoreB._context.id);
 			assert(
@@ -93,6 +94,7 @@ describeNoCompat("GC unreferenced timestamp", (getTestObjectProvider) => {
 
 			await provider.ensureSynchronized();
 			const summaryResult2 = await summarizeNow(summarizer);
+			console.log(JSON.stringify(summaryResult2.summaryTree.tree[".channels"]));
 			const timestamps2 = await getUnreferencedTimestamps(summaryResult2.summaryTree);
 			const dsBTimestamp2 = timestamps2.get(dataStoreB._context.id);
 			assert(dsBTimestamp2 !== undefined, `data store should have unreferenced timestamp`);

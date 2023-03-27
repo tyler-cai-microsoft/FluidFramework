@@ -43,6 +43,7 @@ import {
 	IFluidDataStoreChannel,
 	IGarbageCollectionData,
 	ISummaryTreeWithStats,
+	ITelemetryContext,
 } from "@fluidframework/runtime-definitions";
 import { v4 as uuid } from "uuid";
 import { MockDeltaManager } from "./mockDeltas";
@@ -545,6 +546,25 @@ export class MockFluidDataStoreRuntime
 	public async summarize(
 		fullTree?: boolean,
 		trackState?: boolean,
+	): Promise<ISummaryTreeWithStats> {
+		const stats = mergeStats();
+		stats.treeNodeCount++;
+		return {
+			summary: {
+				type: SummaryType.Tree,
+				tree: {},
+			},
+			stats,
+		};
+	}
+
+	public async summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
 	): Promise<ISummaryTreeWithStats> {
 		const stats = mergeStats();
 		stats.treeNodeCount++;

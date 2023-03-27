@@ -10,3 +10,4 @@ export {
 } from "./summarizerNodeUtils";
 export { IRootSummarizerNode, createRootSummarizerNode } from "./summarizerNode";
 export { IRootSummarizerNodeWithGC, createRootSummarizerNodeWithGC } from "./summarizerNodeWithGc";
+export { ChangeNode } from "./changeNode";

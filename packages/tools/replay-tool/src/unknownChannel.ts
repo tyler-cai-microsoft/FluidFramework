@@ -38,6 +38,7 @@ class UnknownChannel implements IChannel {
 			rollback: (content: any, localOpMetadata: unknown) => {},
 		});
 	}
+	owner?: string;
 
 	get IFluidLoadable() {
 		return this;
@@ -70,6 +71,17 @@ class UnknownChannel implements IChannel {
 		fullTree?: boolean,
 		trackState?: boolean,
 		telemetryContext?: ITelemetryContext,
+	): Promise<ISummaryTreeWithStats> {
+		return this.getAttachSummary(fullTree, trackState, telemetryContext);
+	}
+
+	public async summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
 	): Promise<ISummaryTreeWithStats> {
 		return this.getAttachSummary(fullTree, trackState, telemetryContext);
 	}

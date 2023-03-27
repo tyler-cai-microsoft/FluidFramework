@@ -10,7 +10,11 @@ import {
 	IFluidDataStoreRuntime,
 } from "@fluidframework/datastore-definitions";
 import { ISequencedDocumentMessage } from "@fluidframework/protocol-definitions";
-import { IGarbageCollectionData, ISummaryTreeWithStats } from "@fluidframework/runtime-definitions";
+import {
+	IGarbageCollectionData,
+	ISummaryTreeWithStats,
+	ITelemetryContext,
+} from "@fluidframework/runtime-definitions";
 import { validateAssertionError } from "@fluidframework/test-runtime-utils";
 import { IFluidSerializer } from "../serializer";
 import { SharedObject, SharedObjectCore } from "../sharedObject";
@@ -80,6 +84,16 @@ class MySharedObjectCore extends SharedObjectCore {
 	public async summarize(
 		fullTree?: boolean,
 		trackState?: boolean,
+	): Promise<ISummaryTreeWithStats> {
+		throw new Error("Method not implemented.");
+	}
+	public async summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
 	): Promise<ISummaryTreeWithStats> {
 		throw new Error("Method not implemented.");
 	}

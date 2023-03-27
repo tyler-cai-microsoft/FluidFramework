@@ -23,6 +23,7 @@ import { delay, stringToBuffer } from "@fluidframework/common-utils";
 import { gcTreeKey } from "@fluidframework/runtime-definitions";
 import { ISummaryTree, SummaryType } from "@fluidframework/protocol-definitions";
 import { LoaderHeader } from "@fluidframework/container-definitions";
+import { SharedMap } from "@fluidframework/map";
 import {
 	getGCStateFromSummary,
 	getGCDeletedStateFromSummary,
@@ -91,6 +92,9 @@ describeNoCompat("GC sweep unreference phases", (getTestObjectProvider) => {
 
 		const { container, summarizer } = await loadSummarizerAndContainer();
 
+		const dds2 = SharedMap.create(mainDataStore._runtime);
+		mainDataStore._root.set("dds2", dds2.handle);
+
 		// create datastore and blob
 		const dataStore = await mainDataStore._context.containerRuntime.createDataStore(
 			TestDataObjectType,
@@ -147,6 +151,7 @@ describeNoCompat("GC sweep unreference phases", (getTestObjectProvider) => {
 			"Data Store should be in the summary!",
 		);
 
+		console.log("------------------------------------------------");
 		// Wait inactive timeout
 		await delay(inactiveTimeoutMs);
 		// Summarize and verify datastore and blob are unreferenced and not tombstoned

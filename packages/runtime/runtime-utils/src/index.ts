@@ -21,6 +21,7 @@ export { RuntimeFactoryHelper } from "./runtimeFactoryHelper";
 export {
 	createRootSummarizerNode,
 	createRootSummarizerNodeWithGC,
+	ChangeNode,
 	IFetchSnapshotResult,
 	IRootSummarizerNode,
 	IRootSummarizerNodeWithGC,

@@ -57,6 +57,7 @@ import {
 	ISummaryTreeWithStats,
 	VisibilityState,
 	ITelemetryContext,
+	channelsTreeName,
 } from "@fluidframework/runtime-definitions";
 import {
 	convertSnapshotTreeToSummaryTree,
@@ -866,6 +867,47 @@ export class FluidDataStoreRuntime
 						fullTree,
 						trackState,
 						telemetryContext,
+					);
+					summaryBuilder.addWithStats(contextId, contextSummary);
+				}),
+		);
+
+		return summaryBuilder.getSummaryTree();
+	}
+
+	public async summarize2(
+		fullTree: boolean = false,
+		trackState: boolean = true,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		parentPath: string,
+	): Promise<ISummaryTreeWithStats> {
+		const summaryBuilder = new SummaryTreeBuilder();
+		const channelPath = `${parentPath}/${channelsTreeName}`;
+
+		// Iterate over each data store and ask it to summarize
+		await Promise.all(
+			Array.from(this.contexts)
+				.filter(([contextId, _]) => {
+					const isAttached = this.isChannelAttached(contextId);
+					// We are not expecting local dds! Summary may not capture local state.
+					assert(
+						isAttached,
+						0x17f /* "Not expecting detached channels during summarize" */,
+					);
+					// If the object is registered - and we have received the sequenced op creating the object
+					// (i.e. it has a base mapping) - then we go ahead and summarize
+					return isAttached;
+				})
+				.map(async ([contextId, context]) => {
+					const contextSummary = await context.summarize2(
+						fullTree,
+						trackState,
+						telemetryContext,
+						previousSequenceNumber,
+						currentSequenceNumber,
+						channelPath,
 					);
 					summaryBuilder.addWithStats(contextId, contextSummary);
 				}),

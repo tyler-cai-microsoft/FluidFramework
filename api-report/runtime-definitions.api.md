@@ -187,6 +187,8 @@ export interface IFluidDataStoreChannel extends IFluidRouter, IDisposable {
     rollback?(type: string, content: any, localOpMetadata: unknown): void;
     setConnectionState(connected: boolean, clientId?: string): any;
     summarize(fullTree?: boolean, trackState?: boolean, telemetryContext?: ITelemetryContext): Promise<ISummaryTreeWithStats>;
+    // (undocumented)
+    summarize2(fullTree: boolean, trackState: boolean, telemetryContext: ITelemetryContext, previousSequenceNumber: number, currentSequenceNumber: number, path: string): Promise<ISummaryTreeWithStats>;
     updateUsedRoutes(usedRoutes: string[]): void;
     // (undocumented)
     readonly visibilityState?: VisibilityState_2;

@@ -24,7 +24,9 @@ import { readAndParse } from "@fluidframework/driver-utils";
 import { DataProcessingError } from "@fluidframework/container-utils";
 import { assert, Lazy } from "@fluidframework/common-utils";
 import { IFluidHandle } from "@fluidframework/core-interfaces";
+import { addBlobToSummary } from "@fluidframework/runtime-utils";
 import {
+	attributesBlobKey,
 	createServiceEndpoints,
 	IChannelContext,
 	summarizeChannel,
@@ -131,6 +133,42 @@ export abstract class LocalChannelContextBase implements IChannelContext {
 			0x18c /* "Channel should be loaded to summarize" */,
 		);
 		return summarizeChannelAsync(this.channel, fullTree, trackState, telemetryContext);
+	}
+
+	public async summarize2(
+		fullTree: boolean = false,
+		trackState: boolean = false,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		parentPath: string,
+	): Promise<ISummarizeResult> {
+		assert(
+			this.isLoaded && this.channel !== undefined,
+			0x18c /* "Channel should be loaded to summarize" */,
+		);
+		const path = `${parentPath}/${this.id}`;
+
+		if (this.channel.summarize2 === undefined) {
+			throw new Error();
+		}
+
+		const summarizeResult = await this.channel.summarize2(
+			fullTree,
+			trackState,
+			telemetryContext,
+			previousSequenceNumber,
+			currentSequenceNumber,
+			path,
+		);
+
+		// Add the channel attributes to the returned result.
+		addBlobToSummary(
+			summarizeResult,
+			attributesBlobKey,
+			JSON.stringify(this.channel.attributes),
+		);
+		return summarizeResult;
 	}
 
 	public getAttachSummary(telemetryContext?: ITelemetryContext): ISummarizeResult {

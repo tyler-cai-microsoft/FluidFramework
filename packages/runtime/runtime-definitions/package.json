@@ -64,6 +64,9 @@
 		"broken": {
 			"InterfaceDeclaration_ITelemetryContext": {
 				"forwardCompat": false
+			},
+			"InterfaceDeclaration_IFluidDataStoreChannel": {
+				"forwardCompat": false
 			}
 		}
 	}

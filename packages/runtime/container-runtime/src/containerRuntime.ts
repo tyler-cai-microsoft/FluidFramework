@@ -1605,11 +1605,11 @@ export class ContainerRuntime
 	}
 
 	/** Adds the container's metadata to the given summary tree. */
-	private addMetadataToSummary(summaryTree: ISummaryTreeWithStats) {
+	private addMetadataToSummary(summaryTree: ISummaryTreeWithStats, isSummarize2: boolean) {
 		const metadata: IContainerRuntimeMetadata = {
 			...this.createContainerMetadata,
 			// Increment the summary number for the next summary that will be generated.
-			summaryNumber: this.nextSummaryNumber++,
+			summaryNumber: isSummarize2 ? this.nextSummaryNumber : this.nextSummaryNumber++,
 			summaryFormatVersion: 1,
 			...this.garbageCollector.getMetadata(),
 			// The last message processed at the time of summary. If there are no new messages, use the message from the
@@ -1626,8 +1626,9 @@ export class ContainerRuntime
 		fullTree: boolean,
 		trackState: boolean,
 		telemetryContext?: ITelemetryContext,
+		isSummarize2: boolean = false,
 	) {
-		this.addMetadataToSummary(summaryTree);
+		this.addMetadataToSummary(summaryTree, isSummarize2);
 
 		if (this.remoteMessageProcessor.partialMessages.size > 0) {
 			const content = JSON.stringify([...this.remoteMessageProcessor.partialMessages]);
@@ -2275,6 +2276,37 @@ export class ContainerRuntime
 		};
 	}
 
+	private async summarizeInternal2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
+	) {
+		const summarizeResult = await this.dataStores.summarize2(
+			fullTree,
+			trackState,
+			telemetryContext,
+			previousSequenceNumber,
+			currentSequenceNumber,
+			path,
+		);
+
+		// Wrap data store summaries in .channels subtree.
+		wrapSummaryInChannelsTree(summarizeResult);
+
+		// Set incrementSummaryNumber to false so the summary's match - this is a hack
+		this.addContainerStateToSummary(
+			summarizeResult,
+			fullTree,
+			trackState,
+			telemetryContext,
+			true,
+		);
+		return summarizeResult;
+	}
+
 	/**
 	 * Returns a summary of the runtime at the current sequence number.
 	 */
@@ -2291,6 +2323,8 @@ export class ContainerRuntime
 		fullGC?: boolean;
 		/** True to run GC sweep phase after the mark phase */
 		runSweep?: boolean;
+		previousSequenceNumber?: number;
+		currentSequenceNumber?: number;
 	}): Promise<IRootSummaryTreeWithStats> {
 		this.verifyNotClosed();
 
@@ -2301,6 +2335,8 @@ export class ContainerRuntime
 			runGC = this.garbageCollector.shouldRunGC,
 			runSweep,
 			fullGC,
+			previousSequenceNumber,
+			currentSequenceNumber,
 		} = options;
 
 		const telemetryContext = new TelemetryContext();
@@ -2321,11 +2357,36 @@ export class ContainerRuntime
 			);
 		}
 
+		let summaryResult: ISummaryTreeWithStats | undefined;
+		if (previousSequenceNumber !== undefined && currentSequenceNumber !== undefined) {
+			summaryResult = await this.summarizeInternal2(
+				fullTree,
+				trackState,
+				telemetryContext,
+				previousSequenceNumber,
+				currentSequenceNumber,
+				"",
+			);
+		}
+
 		const { stats, summary } = await this.summarizerNode.summarize(
 			fullTree,
 			trackState,
 			telemetryContext,
 		);
+
+		const summary1 = JSON.stringify({ summary, stats });
+		const summary2 = JSON.stringify(summaryResult);
+
+		if (summary1 !== summary2 && summaryResult !== undefined) {
+			console.log(summary1);
+			console.log(summary2);
+			this.mc.logger.sendErrorEvent({
+				eventName: "Summarize2NotMatched",
+				summary1,
+				summary2,
+			});
+		}
 
 		this.logger.sendTelemetryEvent({
 			eventName: "SummarizeTelemetry",
@@ -2621,11 +2682,14 @@ export class ContainerRuntime
 			// state of all the nodes.
 			const forcedFullTree = this.garbageCollector.summaryStateNeedsReset;
 			try {
+				const previousSummaryNumber = this.summarizerNode.referenceSequenceNumber;
 				summarizeResult = await this.summarize({
 					fullTree: fullTree ?? forcedFullTree,
 					trackState: true,
 					summaryLogger: summaryNumberLogger,
 					runGC: this.garbageCollector.shouldRunGC,
+					previousSequenceNumber: previousSummaryNumber,
+					currentSequenceNumber: summaryRefSeqNum,
 				});
 			} catch (error) {
 				return {

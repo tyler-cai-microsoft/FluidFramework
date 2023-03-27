@@ -52,6 +52,7 @@ import {
 } from "@fluidframework/runtime-definitions";
 import {
 	addBlobToSummary,
+	ChangeNode,
 	convertSummaryTreeToITree,
 	packagePathToTelemetryProperty,
 } from "@fluidframework/runtime-utils";
@@ -256,6 +257,7 @@ export abstract class FluidDataStoreContext
 	protected _attachState: AttachState;
 	private _isInMemoryRoot: boolean = false;
 	protected readonly summarizerNode: ISummarizerNodeWithGC;
+	protected readonly changeNode: ChangeNode;
 	protected readonly mc: MonitoringContext;
 	private readonly thresholdOpsCounter: ThresholdCounter;
 	private static readonly pendingOpsCountThreshold = 1000;
@@ -326,6 +328,8 @@ export abstract class FluidDataStoreContext
 			async (fullGC?: boolean) => this.getGCDataInternal(fullGC),
 			async () => this.getBaseGCDetails(),
 		);
+
+		this.changeNode = new ChangeNode(this.summarizerNode.referenceSequenceNumber);
 
 		this.mc = loggerToMonitoringContext(
 			ChildLogger.create(this.logger, "FluidDataStoreContext"),
@@ -504,6 +508,7 @@ export abstract class FluidDataStoreContext
 		};
 
 		this.summarizerNode.recordChange(message);
+		this.changeNode.invalidate(message.sequenceNumber);
 
 		if (this.loaded) {
 			return this.channel?.process(message, local, localOpMetadata);
@@ -548,6 +553,28 @@ export abstract class FluidDataStoreContext
 		return this.summarizerNode.summarize(fullTree, trackState, telemetryContext);
 	}
 
+	public async summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		parentPath: string,
+	): Promise<ISummarizeResult> {
+		const path = `${parentPath}/${this.id}`;
+		if (!fullTree && !this.changeNode.hasChanged(previousSequenceNumber)) {
+			return this.changeNode.generateSummaryHandle(fullTree, previousSequenceNumber, path);
+		}
+		return this.summarizeInternal2(
+			fullTree,
+			trackState,
+			telemetryContext,
+			previousSequenceNumber,
+			currentSequenceNumber,
+			path,
+		);
+	}
+
 	private async summarizeInternal(
 		fullTree: boolean,
 		trackState: boolean,
@@ -584,6 +611,46 @@ export abstract class FluidDataStoreContext
 			id: this.id,
 			pathPartsForChildren,
 		};
+	}
+
+	private async summarizeInternal2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		path: string,
+	): Promise<ISummarizeResult> {
+		await this.realize();
+
+		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+		const summarizeResult = await this.channel!.summarize2(
+			fullTree,
+			trackState,
+			telemetryContext,
+			previousSequenceNumber,
+			currentSequenceNumber,
+			path,
+		);
+
+		// Wrap dds summaries in .channels subtree.
+		wrapSummaryInChannelsTree(summarizeResult);
+
+		// Add data store's attributes to the summary.
+		const { pkg } = await this.getInitialSnapshotDetails();
+		const isRoot = await this.isRoot();
+		const attributes = createAttributes(pkg, isRoot);
+		addBlobToSummary(summarizeResult, dataStoreAttributesBlobName, JSON.stringify(attributes));
+
+		// If we are not referenced, mark the summary tree as unreferenced. Also, update unreferenced blob
+		// size in the summary stats with the blobs size of this data store.
+		if (!this.summarizerNode.isReferenced()) {
+			summarizeResult.summary.unreferenced = true;
+			summarizeResult.stats.unreferencedBlobSize = summarizeResult.stats.totalBlobSize;
+		}
+
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+		return summarizeResult;
 	}
 
 	/**
@@ -632,6 +699,7 @@ export abstract class FluidDataStoreContext
 	public updateUsedRoutes(usedRoutes: string[]) {
 		// Update the used routes in this data store's summarizer node.
 		this.summarizerNode.updateUsedRoutes(usedRoutes);
+		this.changeNode.updateUsedRoutes(usedRoutes);
 
 		/**
 		 * Store the used routes to update the channel if the data store is not loaded yet. If the used routes changed
@@ -720,6 +788,7 @@ export abstract class FluidDataStoreContext
 		const latestSequenceNumber = this.deltaManager.lastSequenceNumber;
 
 		this.summarizerNode.invalidate(latestSequenceNumber);
+		this.changeNode.invalidate(latestSequenceNumber);
 
 		const channelSummarizerNode = this.summarizerNode.getChild(address);
 

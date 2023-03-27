@@ -26,6 +26,7 @@ import {
 	ISummarizerNodeWithGC,
 	ITelemetryContext,
 } from "@fluidframework/runtime-definitions";
+import { addBlobToSummary, ChangeNode } from "@fluidframework/runtime-utils";
 import { ChildLogger, TelemetryDataTag, ThresholdCounter } from "@fluidframework/telemetry-utils";
 import {
 	attributesBlobKey,
@@ -47,6 +48,7 @@ export class RemoteChannelContext implements IChannelContext {
 		readonly objectStorage: ChannelStorageService;
 	};
 	private readonly summarizerNode: ISummarizerNodeWithGC;
+	private readonly changeNode: ChangeNode;
 	private readonly subLogger: ITelemetryLogger;
 	private readonly thresholdOpsCounter: ThresholdCounter;
 	private static readonly pendingOpsCountThreshold = 1000;
@@ -94,6 +96,8 @@ export class RemoteChannelContext implements IChannelContext {
 			async () => getBaseGCDetails(),
 		);
 
+		this.changeNode = new ChangeNode(this.summarizerNode.referenceSequenceNumber);
+
 		this.thresholdOpsCounter = new ThresholdCounter(
 			RemoteChannelContext.pendingOpsCountThreshold,
 			this.subLogger,
@@ -129,6 +133,7 @@ export class RemoteChannelContext implements IChannelContext {
 		localOpMetadata: unknown,
 	): void {
 		this.summarizerNode.invalidate(message.sequenceNumber);
+		this.changeNode.invalidate(message.sequenceNumber);
 
 		if (this.isLoaded) {
 			this.services.deltaConnection.process(message, local, localOpMetadata);
@@ -164,6 +169,38 @@ export class RemoteChannelContext implements IChannelContext {
 		telemetryContext?: ITelemetryContext,
 	): Promise<ISummarizeResult> {
 		return this.summarizerNode.summarize(fullTree, trackState, telemetryContext);
+	}
+
+	public async summarize2(
+		fullTree: boolean,
+		trackState: boolean,
+		telemetryContext: ITelemetryContext,
+		previousSequenceNumber: number,
+		currentSequenceNumber: number,
+		parentPath: string,
+	): Promise<ISummarizeResult> {
+		const path = `${parentPath}/${this.id}`;
+		if (!fullTree && !this.changeNode.hasChanged(previousSequenceNumber)) {
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+			return this.changeNode.generateSummaryHandle(fullTree, previousSequenceNumber, path);
+		}
+
+		const channel = await this.getChannel();
+
+		if (channel.summarize2 === undefined) {
+			throw new Error();
+		}
+		const summarizeResult = await channel.summarize2(
+			fullTree,
+			trackState,
+			telemetryContext,
+			previousSequenceNumber,
+			currentSequenceNumber,
+			path,
+		);
+		addBlobToSummary(summarizeResult, attributesBlobKey, JSON.stringify(channel.attributes));
+
+		return summarizeResult;
 	}
 
 	private async summarizeInternal(
