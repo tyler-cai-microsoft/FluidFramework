@@ -1,0 +1,25 @@
+# Copyright (c) Microsoft Corporation and contributors. All rights reserved.
+# Licensed under the MIT License.
+
+# test-stability pipeline (for the purpose of detecting intermittent and flaky failures)
+
+name: $(Build.BuildId)
+
+trigger: none
+pr: none
+
+variables:
+- group: prague-key-vault
+
+stages:
+  # read test results and alert!
+  - stage:
+    displayName: test results
+    dependsOn: []
+    jobs:
+      job:
+      displayName: fail immediately
+      pool: Small
+      # Download artifact
+      - bash: exit 1
+        displayName: Fail if there is an e2e test failure
