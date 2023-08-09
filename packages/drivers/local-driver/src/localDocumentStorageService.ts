@@ -98,11 +98,15 @@ export class LocalDocumentStorageService implements IDocumentStorageService {
 			const version = await this.getVersions(this.id, 1);
 			return version[0].id;
 		}
-		return this.summaryTreeUploadManager.writeSummaryTree(
+
+		console.log(summary);
+		const val = await this.summaryTreeUploadManager.writeSummaryTree(
 			summary,
 			context.ackHandle ?? "",
 			"channel",
 		);
+		console.log(this.summaryTreeUploadManager);
+		return val;
 	}
 
 	public async createBlob(file: ArrayBufferLike): Promise<ICreateBlobResponse> {

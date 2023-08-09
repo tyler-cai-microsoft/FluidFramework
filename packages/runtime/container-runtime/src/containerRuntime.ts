@@ -212,6 +212,9 @@ export enum ContainerMessageType {
 	 * See the [IdCompressor README](./id-compressor/README.md) for more details.
 	 */
 	IdAllocation = "idAllocation",
+
+	Propose = "propose",
+	Accept = "accept",
 }
 
 export interface ContainerRuntimeMessage {
@@ -536,6 +539,8 @@ const defaultChunkSizeInBytes = 204800;
  */
 const defaultCloseSummarizerDelayMs = 5000; // 5 seconds
 
+export const detachedClientType = "detachedClientType";
+
 /**
  * @deprecated - use ContainerRuntimeMessage instead
  */
@@ -762,6 +767,8 @@ export class ContainerRuntime
 				loadSequenceNumberVerification !== "bypass" &&
 				runtimeSequenceNumber !== protocolSequenceNumber
 			) {
+				console.log(runtimeSequenceNumber);
+				console.log(protocolSequenceNumber);
 				// "Load from summary, runtime metadata sequenceNumber !== initialSequenceNumber"
 				const error = new DataCorruptionError(
 					// pre-0.58 error message: SummaryMetadataMismatch
@@ -837,6 +844,8 @@ export class ContainerRuntime
 
 	public readonly clientDetails: IClientDetails;
 
+	public waitingForTransition: boolean = false;
+
 	public get storage(): IDocumentStorageService {
 		return this._storage;
 	}
@@ -870,6 +879,7 @@ export class ContainerRuntime
 	private readonly submitSignalFn: (contents: any) => void;
 	public readonly disposeFn: (error?: ICriticalContainerError) => void;
 	public readonly closeFn: (error?: ICriticalContainerError) => void;
+	public readonly loadDetachedAndTransitionFn: () => Promise<ContainerRuntime>;
 
 	public get flushMode(): FlushMode {
 		return this._flushMode;
@@ -918,7 +928,7 @@ export class ContainerRuntime
 	 * do not create it (see SummarizerClientElection.clientDetailsPermitElection() for details)
 	 */
 	private readonly summaryManager?: SummaryManager;
-	private readonly summaryCollection: SummaryCollection;
+	public readonly summaryCollection: SummaryCollection;
 
 	private readonly summarizerNode: IRootSummarizerNodeWithGC;
 
@@ -1145,13 +1155,43 @@ export class ContainerRuntime
 		this.submitBatchFn = submitBatchFn;
 		this.submitSummaryFn = submitSummaryFn;
 		this.submitSignalFn = submitSignalFn;
+		this._getAttachState = () => context.attachState;
 
 		this.options = options;
 		this.clientDetails = clientDetails;
+		const isDetachedClient = this.clientDetails.type === detachedClientType;
+		if (isDetachedClient) {
+			this.submitFn = () => 0;
+			this.submitBatchFn = () => 0;
+			this.submitSummaryFn = () => 0;
+			this.submitSignalFn = () => {};
+		}
+
+		this.loadDetachedAndTransitionFn = async () => {
+			assert(this.isSummarizerClient, "Transitioning on a non summarizer client!");
+			const request: IRequest = {
+				headers: {
+					[LoaderHeader.cache]: false,
+					[LoaderHeader.clientDetails]: {
+						capabilities: { interactive: false },
+						type: detachedClientType,
+					},
+					[DriverHeader.summarizingClient]: true,
+					[LoaderHeader.reconnect]: false,
+				},
+				url: "/_detachedContainerRuntime",
+			};
+
+			const containerRuntime = await requestFluidObject<FluidObject<ContainerRuntime>>(
+				loader,
+				request,
+			);
+			return containerRuntime as ContainerRuntime;
+		};
+
 		this.isSummarizerClient = this.clientDetails.type === summarizerClientType;
 		this.loadedFromVersionId = context.getLoadedFromVersion()?.id;
 		this._getClientId = () => context.clientId;
-		this._getAttachState = () => context.attachState;
 		this.getAbsoluteUrl = async (relativeUrl: string) => {
 			if (context.getAbsoluteUrl === undefined) {
 				throw new Error("Driver does not implement getAbsoluteUrl");
@@ -1695,6 +1735,15 @@ export class ContainerRuntime
 				}
 				return create404Response(request);
 			}
+
+			if (id === "_detachedContainerRuntime" && parser.pathParts.length === 1) {
+				return {
+					status: 200,
+					mimeType: "fluid/object",
+					value: this,
+				};
+			}
+
 			if (this.requestHandler !== undefined) {
 				return this.requestHandler(parser, this);
 			}
@@ -1973,6 +2022,10 @@ export class ContainerRuntime
 				throw new Error("chunkedOp not expected here");
 			case ContainerMessageType.Rejoin:
 				throw new Error("rejoin not expected here");
+			case ContainerMessageType.Propose:
+				throw new Error("propse not expected here");
+			case ContainerMessageType.Accept:
+				throw new Error("accept not expected here");
 			default:
 				unreachableCase(type, `Unknown ContainerMessageType: ${type}`);
 		}
@@ -2153,6 +2206,21 @@ export class ContainerRuntime
 					break;
 				case ContainerMessageType.ChunkedOp:
 				case ContainerMessageType.Rejoin:
+					break;
+				case ContainerMessageType.Propose:
+					if (!this.isSummarizerClient) {
+						if (message.contents === this.clientId && !this.waitingForTransition) {
+							this.summaryManager?.forceSummarization();
+						}
+						this.waitingForTransition = true;
+						void this.deltaManager.outbound.pause();
+					}
+					break;
+				case ContainerMessageType.Accept:
+					if (this.waitingForTransition) {
+						this.waitingForTransition = false;
+						this.closeFn();
+					}
 					break;
 				default:
 					if (runtimeMessage) {
@@ -2825,6 +2893,16 @@ export class ContainerRuntime
 		);
 	}
 
+	public submitTransition() {
+		this.verifyNotClosed();
+		this.submit({ type: ContainerMessageType.Propose, contents: "" });
+	}
+
+	public submitFinished(summaryHandle: string) {
+		this.verifyNotClosed();
+		this.submit({ type: ContainerMessageType.Accept, contents: { summaryHandle } });
+	}
+
 	/**
 	 * Generates the summary tree, uploads it to storage, and then submits the summarize op.
 	 * This is intended to be called by the summarizer, since it is the implementation of
@@ -2881,7 +2959,9 @@ export class ContainerRuntime
 			const message = `Summary @${summaryRefSeqNum}:${this.deltaManager.minimumSequenceNumber}`;
 			const lastAck = this.summaryCollection.latestAck;
 
-			this.summarizerNode.startSummary(summaryRefSeqNum, summaryNumberLogger);
+			if (options.summarizeResult === undefined) {
+				this.summarizerNode.startSummary(summaryRefSeqNum, summaryNumberLogger);
+			}
 
 			// Helper function to check whether we should still continue between each async step.
 			const checkContinue = (): { continue: true } | { continue: false; error: string } => {
@@ -2938,12 +3018,16 @@ export class ContainerRuntime
 			// state of all the nodes.
 			const forcedFullTree = this.garbageCollector.summaryStateNeedsReset;
 			try {
-				summarizeResult = await this.summarize({
-					fullTree: fullTree || forcedFullTree,
-					trackState: true,
-					summaryLogger: summaryNumberLogger,
-					runGC: this.garbageCollector.shouldRunGC,
-				});
+				summarizeResult =
+					options.summarizeResult ??
+					(await this.summarize({
+						fullTree: fullTree || forcedFullTree,
+						trackState: true,
+						summaryLogger: summaryNumberLogger,
+						runGC: this.garbageCollector.shouldRunGC,
+					}));
+				this.addMetadataToSummary(summarizeResult);
+				console.log(JSON.stringify(summarizeResult));
 			} catch (error) {
 				return {
 					stage: "base",
@@ -3037,6 +3121,7 @@ export class ContainerRuntime
 				};
 			}
 
+			console.log(summaryContext);
 			let handle: string;
 			try {
 				handle = await this.storage.uploadSummaryWithContext(
@@ -3046,6 +3131,7 @@ export class ContainerRuntime
 			} catch (error) {
 				return { stage: "generate", ...generateSummaryData, error };
 			}
+			console.log(handle);
 
 			const parent = summaryContext.ackHandle;
 			const summaryMessage: ISummaryContent = {
@@ -3081,11 +3167,13 @@ export class ContainerRuntime
 			} as const;
 
 			try {
-				// If validateSummaryBeforeUpload is false, the summary should be validated in this step.
-				this.summarizerNode.completeSummary(
-					handle,
-					!this.validateSummaryBeforeUpload /* validate */,
-				);
+				if (options.summarizeResult === undefined) {
+					// If validateSummaryBeforeUpload is false, the summary should be validated in this step.
+					this.summarizerNode.completeSummary(
+						handle,
+						!this.validateSummaryBeforeUpload /* validate */,
+					);
+				}
 			} catch (error) {
 				return { stage: "upload", ...uploadData, error };
 			}
@@ -3434,6 +3522,14 @@ export class ContainerRuntime
 			case ContainerMessageType.Rejoin:
 				this.submit(message);
 				break;
+			case ContainerMessageType.Propose:
+				if (!this.waitingForTransition) {
+					this.submit(message);
+				}
+				break;
+			case ContainerMessageType.Accept:
+				this.submit(message);
+				break;
 			default:
 				unreachableCase(
 					message.type,
@@ -3774,6 +3870,12 @@ export class ContainerRuntime
 			return summarizer;
 		};
 	}
+
+	/**
+	 * * Forms a function that will request a Summarizer.
+	 * @param loaderRouter - the loader acting as an IFluidRouter
+	 * */
+	public async formRequestDetachedRuntimeFn() {}
 
 	private validateSummaryHeuristicConfiguration(configuration: ISummaryConfigurationHeuristics) {
 		// eslint-disable-next-line no-restricted-syntax

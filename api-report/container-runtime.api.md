@@ -134,6 +134,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     ensureNoDataModelChanges<T>(callback: () => T): T;
     // (undocumented)
     get flushMode(): FlushMode;
+    formRequestDetachedRuntimeFn(): Promise<void>;
     readonly gcTombstoneEnforcementAllowed: boolean;
     // (undocumented)
     readonly getAbsoluteUrl: (relativeUrl: string) => Promise<string | undefined>;
@@ -166,6 +167,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     get isDirty(): boolean;
     // @deprecated (undocumented)
     static load(context: IContainerContext, registryEntries: NamedFluidDataStoreRegistryEntries, requestHandler?: (request: IRequest, runtime: IContainerRuntime) => Promise<IResponse>, runtimeOptions?: IContainerRuntimeOptions, containerScope?: FluidObject, existing?: boolean, containerRuntimeCtor?: typeof ContainerRuntime): Promise<ContainerRuntime>;
+    // (undocumented)
+    readonly loadDetachedAndTransitionFn: () => Promise<void>;
     static loadRuntime(params: {
         context: IContainerContext;
         registryEntries: NamedFluidDataStoreRegistryEntries;
@@ -223,6 +226,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     // (undocumented)
     readonly summarizeOnDemand: ISummarizer["summarizeOnDemand"];
     get summarizerClientId(): string | undefined;
+    // (undocumented)
+    readonly summaryCollection: SummaryCollection;
     updateStateBeforeGC(): Promise<void>;
     updateTombstonedRoutes(tombstonedRoutes: string[]): void;
     updateUnusedRoutes(unusedRoutes: string[]): void;
@@ -241,6 +246,9 @@ export interface ContainerRuntimeMessage {
 
 // @public (undocumented)
 export const DefaultSummaryConfiguration: ISummaryConfiguration;
+
+// @public (undocumented)
+export const detachedClientType = "detachedClientType";
 
 // @public (undocumented)
 export type EnqueueSummarizeResult = (ISummarizeResults & {

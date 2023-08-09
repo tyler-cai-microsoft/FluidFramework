@@ -6,6 +6,7 @@
 export {
 	ContainerMessageType,
 	ContainerRuntimeMessage,
+	detachedClientType,
 	ISummaryRuntimeOptions,
 	ISummaryBaseConfiguration,
 	ISummaryConfigurationHeuristics,
@@ -32,6 +33,7 @@ export {
 	ISummarizeResults,
 	ISummaryCancellationToken,
 	neverCancelledSummaryToken,
+	summarizerClientType,
 	Summarizer,
 	SummarizerStopReason,
 	SummaryCollection,

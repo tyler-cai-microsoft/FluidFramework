@@ -56,11 +56,13 @@ export interface ITestObjectProvider {
 	createContainer(
 		entryPoint: fluidEntryPoint,
 		loaderProps?: Partial<ILoaderProps>,
+		codeDetails?: IFluidCodeDetails,
 	): Promise<IContainer>;
 	loadContainer(
 		entryPoint: fluidEntryPoint,
 		loaderProps?: Partial<ILoaderProps>,
 		requestHeader?: IRequestHeader,
+		packageEntries?: Iterable<[IFluidCodeDetails, fluidEntryPoint]>,
 	): Promise<IContainer>;
 
 	/**
@@ -358,15 +360,19 @@ export class TestObjectProvider implements ITestObjectProvider {
 	 *
 	 * @param packageEntries - list of code details and fluidEntryPoint pairs.
 	 */
-	public async createContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>) {
+	public async createContainer(
+		entryPoint: fluidEntryPoint,
+		loaderProps?: Partial<ILoaderProps>,
+		codeDetails: IFluidCodeDetails = defaultCodeDetails,
+	) {
 		if (this._documentCreated) {
 			throw new Error(
 				"Only one container/document can be created. To load the container/document use loadContainer",
 			);
 		}
-		const loader = this.createLoader([[defaultCodeDetails, entryPoint]], loaderProps);
+		const loader = this.createLoader([[codeDetails, entryPoint]], loaderProps);
 		const container = await createAndAttachContainer(
-			defaultCodeDetails,
+			codeDetails,
 			loader,
 			this.driver.createCreateNewRequest(this.documentId),
 		);
@@ -381,8 +387,11 @@ export class TestObjectProvider implements ITestObjectProvider {
 		entryPoint: fluidEntryPoint,
 		loaderProps?: Partial<ILoaderProps>,
 		requestHeader?: IRequestHeader,
+		packageEntries: Iterable<[IFluidCodeDetails, fluidEntryPoint]> = [
+			[defaultCodeDetails, entryPoint],
+		],
 	): Promise<IContainer> {
-		const loader = this.createLoader([[defaultCodeDetails, entryPoint]], loaderProps);
+		const loader = this.createLoader(packageEntries, loaderProps);
 		return this.resolveContainer(loader, requestHeader);
 	}
 

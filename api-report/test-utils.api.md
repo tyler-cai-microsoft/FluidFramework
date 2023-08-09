@@ -171,7 +171,7 @@ export interface ITestFluidObject extends IProvideTestFluidObject, IFluidLoadabl
 // @public (undocumented)
 export interface ITestObjectProvider {
     // (undocumented)
-    createContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>): Promise<IContainer>;
+    createContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, codeDetails?: IFluidCodeDetails): Promise<IContainer>;
     // (undocumented)
     createFluidEntryPoint: (testContainerConfig?: ITestContainerConfig) => fluidEntryPoint;
     // (undocumented)
@@ -187,7 +187,7 @@ export interface ITestObjectProvider {
     // (undocumented)
     ensureSynchronized(timeoutDuration?: number): Promise<void>;
     // (undocumented)
-    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader): Promise<IContainer>;
+    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader, codeDetails?: IFluidCodeDetails): Promise<IContainer>;
     // (undocumented)
     loadTestContainer(testContainerConfig?: ITestContainerConfig, requestHeader?: IRequestHeader): Promise<IContainer>;
     // (undocumented)
@@ -295,7 +295,7 @@ export class TestFluidObjectFactory implements IFluidDataStoreFactory {
 // @public
 export class TestObjectProvider implements ITestObjectProvider {
     constructor(LoaderConstructor: typeof Loader, driver: ITestDriver, createFluidEntryPoint: (testContainerConfig?: ITestContainerConfig) => fluidEntryPoint);
-    createContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>): Promise<IContainer>;
+    createContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, codeDetails?: IFluidCodeDetails): Promise<IContainer>;
     // (undocumented)
     readonly createFluidEntryPoint: (testContainerConfig?: ITestContainerConfig) => fluidEntryPoint;
     createLoader(packageEntries: Iterable<[IFluidCodeDetails, fluidEntryPoint]>, loaderProps?: Partial<ILoaderProps>): Loader;
@@ -310,7 +310,7 @@ export class TestObjectProvider implements ITestObjectProvider {
     // (undocumented)
     ensureSynchronized(): Promise<void>;
     // (undocumented)
-    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader): Promise<IContainer>;
+    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader, codeDetails?: IFluidCodeDetails): Promise<IContainer>;
     // (undocumented)
     readonly LoaderConstructor: typeof Loader;
     loadTestContainer(testContainerConfig?: ITestContainerConfig, requestHeader?: IRequestHeader): Promise<IContainer>;
