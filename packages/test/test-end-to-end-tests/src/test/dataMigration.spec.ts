@@ -15,7 +15,6 @@ import {
 import { SharedCell } from "@fluidframework/cell";
 import { SharedMap } from "@fluidframework/map";
 import {
-	ContainerMessageType,
 	ContainerRuntime,
 	DefaultSummaryConfiguration,
 	IContainerRuntimeOptions,
@@ -90,17 +89,12 @@ class DataObjectV2 extends DataObject {
 		const handle = this.root.get<IFluidHandle<SharedMap>>(getterKey);
 		this._getter = await handle?.get();
 	}
-
-	protected async hasInitialized(): Promise<void> {
-		this.root.set("v2", "v2HERE");
-	}
 }
 
 function createReadOnlyContext(
 	context: IContainerContext,
 	codeDetailsVersion: string,
 ): IContainerContext {
-	console.log("readonly context -  - -- - - - - -");
 	const readonlyContext: IContainerContext = {
 		...context,
 		connected: true,
@@ -141,7 +135,6 @@ function createReadOnlyContext(
 class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 	private _currentRuntimeFactory?: ContainerRuntimeFactoryWithDefaultDataStore;
 	private oldRuntime?: ContainerRuntime;
-	private isOldClient: boolean = false;
 	private get currentRuntimeFactory(): ContainerRuntimeFactoryWithDefaultDataStore {
 		assert(
 			this._currentRuntimeFactory !== undefined,
@@ -174,11 +167,9 @@ class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 		assert(codeDetails !== undefined, "get code details failed");
 
 		this._currentRuntimeFactory = codeDetails.package === "v1" ? this.v1 : this.v2;
-		this.isOldClient = codeDetails.package === "v1";
 		if (this.clientDetailsType === detachedClientType) {
 			const detachedContext = createReadOnlyContext(context, "v2");
 			this._currentRuntimeFactory = this.v1ToV2;
-			this.isOldClient = false;
 			return this.currentRuntimeFactory.preInitialize(detachedContext, existing);
 		}
 
@@ -194,13 +185,11 @@ class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 	}
 
 	public async hasInitialized(runtime: ContainerRuntime): Promise<void> {
-		console.log(`clientType: ${this.clientDetailsType}`);
 		await this.currentRuntimeFactory.hasInitialized(runtime);
 
 		if (this.clientDetailsType === summarizerClientType) {
 			this.oldRuntime = runtime;
 			const readonlyRuntime = await runtime.loadDetachedAndTransitionFn();
-			console.log("loading new detached client");
 			this.deferred.resolve({ summarizer: this.oldRuntime, readonlyRuntime });
 		}
 	}
@@ -252,8 +241,6 @@ async function logTree(tree: ISnapshotTree, storage: IDocumentStorageService) {
 }
 
 async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: ContainerRuntime) {
-	console.log("starting data migration");
-
 	(readonlyRuntime as any).summarizerNode.startSummary(
 		readonlyRuntime.deltaManager.lastSequenceNumber,
 		new TelemetryNullLogger(),
@@ -298,8 +285,7 @@ async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: Con
 	// 	},
 	// };
 	// console.log(summary);
-	console.log("summarization finished");
-	const storage = summarizerRuntime.storage;
+	readonlyRuntime.disposeFn();
 	const neverCancel = new Deferred<SummarizerStopReason>();
 	const runningSummarizer = (summarizerRuntime as any).summarizer.runningSummarizer;
 	await runningSummarizer.summarizingLock;
@@ -321,14 +307,11 @@ async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: Con
 		// eslint-disable-next-line @typescript-eslint/no-unsafe-return
 		() => runningSummarizer.afterSummaryAction(),
 	);
-	console.log("summary submitted");
-
 	summarizerRuntime.on("op", (op) => {
-		if (op.type === ContainerMessageType.Accept) {
+		if (op.type === MessageType.Accept) {
 			summarizerRuntime.disposeFn();
 		}
 	});
-	console.log("uploaded");
 	const waitForAck = new Deferred<ISummaryAck>();
 	summarizerRuntime.on("op", (op) => {
 		if (op.type === MessageType.SummaryAck) {
@@ -336,12 +319,7 @@ async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: Con
 		}
 	});
 	const ack = await waitForAck.promise;
-	console.log("grabbing snapshot");
-	console.log(
-		JSON.stringify(await logTree((await storage.getSnapshotTree()) as ISnapshotTree, storage)),
-	);
 	summarizerRuntime.submitFinished("summaryHandle");
-	summarizerRuntime.closeFn();
 	return ack;
 }
 
@@ -459,20 +437,11 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		});
 		const firstSummaryAck = await waitForSummary.promise;
 		container.close();
-		console.log("loading v2...");
 		const transitionContainer = await loadV2Container(firstSummaryAck.handle);
 		await waitForContainerConnection(transitionContainer);
 		await provider.ensureSynchronized();
 		const dObject = await requestFluidObject<DataObjectV1>(transitionContainer, "/");
 		dObject.containerRuntime.submitTransition();
-		const waitForHandle = new Deferred<string>();
-		dObject.containerRuntime.on("op", (op) => {
-			if (op.type === ContainerMessageType.Accept) {
-				const summaryHandle = op.contents.summaryHandle as string;
-				waitForHandle.resolve(summaryHandle);
-			}
-		});
-		console.log("loaded v2");
 		const { summarizer, readonlyRuntime } = await deferred.promise;
 		const waitForSummarizerRuntimeConnection = new Deferred<void>();
 		summarizer.on("connected", () => {
@@ -480,18 +449,18 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		});
 		await waitForSummarizerRuntimeConnection.promise;
 		const migrateAck = await migrate(summarizer, readonlyRuntime);
-		console.log("summary submitted");
 		const summaryVersion = migrateAck.handle;
-		const tree = await readonlyRuntime.storage.getSnapshotTree();
-		console.log(tree);
-		assert(tree !== null, "snapshot should exist");
-		const treeExpanded = await logTree(tree, readonlyRuntime.storage);
-		console.log(treeExpanded);
+		transitionContainer.close();
+		assert(container.closed, "Starting container should be closed");
+		assert(transitionContainer.closed, "Transition container should have closed");
 		const migratedContainer = await loadV2ContainerOnly(summaryVersion);
 		const migratedDataObject = await requestFluidObject<DataObjectV2>(migratedContainer, "/");
 		assert(
 			migratedDataObject.getter.get(cellKey) === "abc",
 			"Document should have transitioned to v2!",
 		);
+		migratedDataObject.getter.set("some", "value");
+		await provider.ensureSynchronized();
+		assert(!migratedContainer.closed, "Migrated container should be in good shape");
 	});
 });

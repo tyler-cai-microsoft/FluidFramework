@@ -767,8 +767,6 @@ export class ContainerRuntime
 				loadSequenceNumberVerification !== "bypass" &&
 				runtimeSequenceNumber !== protocolSequenceNumber
 			) {
-				console.log(runtimeSequenceNumber);
-				console.log(protocolSequenceNumber);
 				// "Load from summary, runtime metadata sequenceNumber !== initialSequenceNumber"
 				const error = new DataCorruptionError(
 					// pre-0.58 error message: SummaryMetadataMismatch
@@ -3027,7 +3025,6 @@ export class ContainerRuntime
 						runGC: this.garbageCollector.shouldRunGC,
 					}));
 				this.addMetadataToSummary(summarizeResult);
-				console.log(JSON.stringify(summarizeResult));
 			} catch (error) {
 				return {
 					stage: "base",
@@ -3121,7 +3118,6 @@ export class ContainerRuntime
 				};
 			}
 
-			console.log(summaryContext);
 			let handle: string;
 			try {
 				handle = await this.storage.uploadSummaryWithContext(
@@ -3131,7 +3127,6 @@ export class ContainerRuntime
 			} catch (error) {
 				return { stage: "generate", ...generateSummaryData, error };
 			}
-			console.log(handle);
 
 			const parent = summaryContext.ackHandle;
 			const summaryMessage: ISummaryContent = {
