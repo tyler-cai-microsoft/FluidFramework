@@ -299,10 +299,6 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 				},
 			},
 		},
-		gcOptions: {
-			disableGC: true,
-			gcAllowed: false,
-		},
 	};
 	const dataObjectFactoryV1 = new DataObjectFactory(
 		TestDataObjectType,
@@ -425,3 +421,5 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		assert(!migratedContainer.closed, "Migrated container should be in good shape");
 	});
 });
+
+describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProvider) => {});
