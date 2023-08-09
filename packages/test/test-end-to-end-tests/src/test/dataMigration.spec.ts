@@ -246,45 +246,6 @@ async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: Con
 		new TelemetryNullLogger(),
 	);
 	const appSummary = await readonlyRuntime.summarize({ fullTree: true });
-	// const quorumSnapshot = (readonlyRuntime.getQuorum() as any).snapshot();
-	// quorumSnapshot.values[0][1].value.package = "v2";
-	// const documentAttributes: IDocumentAttributes = {
-	// 	sequenceNumber: readonlyRuntime.deltaManager.lastSequenceNumber,
-	// 	minimumSequenceNumber: readonlyRuntime.deltaManager.lastSequenceNumber,
-	// 	term: undefined,
-	// };
-	// const protocolSummary: ISummaryTree = {
-	// 	tree: {
-	// 		attributes: {
-	// 			content: JSON.stringify(documentAttributes),
-	// 			type: SummaryType.Blob,
-	// 		},
-	// 		quorumMembers: {
-	// 			content: JSON.stringify(quorumSnapshot.members),
-	// 			type: SummaryType.Blob,
-	// 		},
-	// 		quorumProposals: {
-	// 			content: JSON.stringify(quorumSnapshot.proposals),
-	// 			type: SummaryType.Blob,
-	// 		},
-	// 		quorumValues: {
-	// 			content: JSON.stringify(quorumSnapshot.values),
-	// 			type: SummaryType.Blob,
-	// 		},
-	// 	},
-	// 	type: SummaryType.Tree,
-	// };
-
-	// console.log(protocolSummary);
-
-	// const summary: CombinedAppAndProtocolSummary = {
-	// 	type: SummaryType.Tree,
-	// 	tree: {
-	// 		".protocol": protocolSummary,
-	// 		".app": appSummary.summary,
-	// 	},
-	// };
-	// console.log(summary);
 	readonlyRuntime.disposeFn();
 	const neverCancel = new Deferred<SummarizerStopReason>();
 	const runningSummarizer = (summarizerRuntime as any).summarizer.runningSummarizer;
