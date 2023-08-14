@@ -802,7 +802,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		migrationContext.migrationOn = true;
 		migrationContext.setRuntime(scr3);
 		// Record the last known deltaManager sequence number
-		const lastKnownNumber = scr3.deltaManager.lastKnownSeqNumber;
+		const lastKnownNumber = scr3.deltaManager.lastSequenceNumber;
 
 		const sdo3Converted = await rootDOFactoryV2.createInstance(scr3);
 		for (const [key, value] of sdo3.rootDDS.entries()) {
@@ -817,6 +817,10 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		// Because the ops aren't all processed we get GC unknown outbound routes event which is totally fine.
 		(scr3 as any).flush();
 		migrationContext.process();
+		assert(
+			lastKnownNumber === scr3.deltaManager.lastSequenceNumber,
+			"No sequence numbers should have been processed by the delta manager.",
+		);
 
 		// submit the summary and then turn off the migration, maybe close the summarizer, doesn't really matter.
 		const { summaryRefSeq, summaryVersion } = await summarizeNow(summarizer);
