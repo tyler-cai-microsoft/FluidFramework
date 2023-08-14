@@ -835,6 +835,8 @@ export class ContainerRuntime
 
 	public readonly options: ILoaderOptions;
 
+	public readonly context: IContainerContext;
+
 	private readonly _getClientId: () => string | undefined;
 	public get clientId(): string | undefined {
 		return this._getClientId();
@@ -1143,6 +1145,7 @@ export class ContainerRuntime
 			pendingLocalState,
 			supportedFeatures,
 		} = context;
+		this.context = context;
 
 		this.innerDeltaManager = deltaManager;
 		this.deltaManager = new DeltaManagerSummarizerProxy(this.innerDeltaManager);
@@ -3016,15 +3019,17 @@ export class ContainerRuntime
 			// state of all the nodes.
 			const forcedFullTree = this.garbageCollector.summaryStateNeedsReset;
 			try {
-				summarizeResult =
-					options.summarizeResult ??
-					(await this.summarize({
+				if (options.summarizeResult) {
+					summarizeResult = options.summarizeResult;
+					this.addMetadataToSummary(summarizeResult);
+				} else {
+					summarizeResult = await this.summarize({
 						fullTree: fullTree || forcedFullTree,
 						trackState: true,
 						summaryLogger: summaryNumberLogger,
 						runGC: this.garbageCollector.shouldRunGC,
-					}));
-				this.addMetadataToSummary(summarizeResult);
+					});
+				}
 			} catch (error) {
 				return {
 					stage: "base",
