@@ -817,6 +817,8 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		const scr3 = await conversionRuntimeFactory.summarizerRuntime;
 		const summarizer = (scr3 as any).summarizer;
 		const sdo3 = await requestFluidObject<RootDOV1>(scr3, "/");
+
+		// Grab the id of the unchanged data object to do incremental summary verification.
 		const unchangedHandle3 = await scr3.getAliasedDataStoreEntryPoint("unchanged");
 		assert(unchangedHandle3 !== undefined, "should be able to get the handle");
 		const unchangedDO3 = (await unchangedHandle3.get()) as RootDOV1;
@@ -832,7 +834,6 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		const lastKnownNumber = scr3.deltaManager.lastSequenceNumber;
 
 		// Conversion code
-		// const sdo3Converted = await rootDOFactoryV2.createInstance(scr3);
 		const newDataStoreContext = await (scr3 as any).dataStores.replaceDataStoreContext(
 			[rootDOFactoryV2.type],
 			sdo3.id,
@@ -848,10 +849,8 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		}
 
 		newDataStoreContext.setChannelDirty(sdo3Converted.rootDDS.id);
-		// sdo3.rootDDS.set("handle", sdo3Converted.handle);
 		// End of conversion code
-		// This was added here so GC wouldn't complain during summarization. We will need to consider what to do for GC's case.
-		// scr3.addedGCOutboundReference(sdo3.rootDDS.handle, sdo3Converted.handle);
+		// Learning note: calling addedGCOutboundReference might be useful in cases we want to do create new DOs and reference them.
 		// I needed this to send out all the ops so we are not in a partial batch state when summarizing.
 		(scr3 as any).flush();
 		// This makes the runtime process all the local ops it sent.
@@ -873,7 +872,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 			datastoresTree.tree[unchangedId].type === SummaryType.Handle,
 			"Expected summary handle!",
 		);
-		// sequence number check here.
+		// second sequence number check
 		assert.equal(
 			lastKnownNumber,
 			summaryRefSeq,
@@ -890,5 +889,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 			assert(data === "abc", "should be properly set");
 		}
 		assert(do4.data.length === scripts, `Should have ${scripts} not ${do4.data.length}`);
+		do4.rootDDS.set("any", "op");
+		await provider.ensureSynchronized();
 	});
 });
