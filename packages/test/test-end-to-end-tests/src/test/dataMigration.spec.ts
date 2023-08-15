@@ -72,6 +72,14 @@ async function waitForSummarizeAck(emitter: ContainerRuntime | IContainer): Prom
 	return waitForEventDeferred.promise;
 }
 
+async function waitForConnectedEvent(emitter: ContainerRuntime | IContainer): Promise<void> {
+	const waitForEventDeferred = new Deferred<void>();
+	emitter.on("connected", () => {
+		waitForEventDeferred.resolve();
+	});
+	return waitForEventDeferred.promise;
+}
+
 const defaultRuntimeOptions: IContainerRuntimeOptions = {
 	summaryOptions: {
 		summaryConfigOverrides: {
@@ -195,6 +203,7 @@ function createReadOnlyContext(
 	return readonlyContext;
 }
 
+// This allows us to inject the readonly context when we create the "detached/readonly" container runtime
 class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 	private _currentRuntimeFactory?: ContainerRuntimeFactoryWithDefaultDataStore;
 	private oldRuntime?: ContainerRuntime;
@@ -213,7 +222,7 @@ class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 		private readonly v1ToV2: ContainerRuntimeFactoryWithDefaultDataStore,
 		private readonly v2: ContainerRuntimeFactoryWithDefaultDataStore,
 		private readonly deferred: Deferred<{
-			summarizer: ContainerRuntime;
+			summarizerRuntime: ContainerRuntime;
 			readonlyRuntime: ContainerRuntime;
 		}>,
 	) {
@@ -253,18 +262,22 @@ class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 		if (this.clientDetailsType === summarizerClientType) {
 			this.oldRuntime = runtime;
 			const readonlyRuntime = await runtime.loadDetachedAndTransitionFn();
-			this.deferred.resolve({ summarizer: this.oldRuntime, readonlyRuntime });
+			this.deferred.resolve({ summarizerRuntime: this.oldRuntime, readonlyRuntime });
 		}
 	}
 }
 
+// This is a special conversion factory written specifically for this document to transition a shared cell to a shared map.
+// Customers will need to write some conversion code that is in the load flow.
 class SharedCellToSharedMapFactory implements IChannelFactory {
+	// Note this type is shared cell so that we don't run into channel type not available
 	public static readonly Type = "https://graph.microsoft.com/types/cell";
 
 	public get type(): string {
 		return SharedCellToSharedMapFactory.Type;
 	}
 
+	// Note we are using the shared map attributes here
 	public get attributes(): IChannelAttributes {
 		return SharedMap.getFactory().attributes;
 	}
@@ -280,6 +293,8 @@ class SharedCellToSharedMapFactory implements IChannelFactory {
 		const map = SharedMap.getFactory().create(runtime, id) as SharedMap;
 		const val = cell.get();
 		map.set(cellKey, val as string);
+		// Calling sharedMap.load here doesn't work as loadCore loads the shared map from the shared cell snapshot which obviously breaks.
+		// We could change the load flow here as it would allow us to connect to services independently of loading from the snapshot.
 		return map;
 	}
 
@@ -288,6 +303,7 @@ class SharedCellToSharedMapFactory implements IChannelFactory {
 	}
 }
 
+// Might be useful if you want to look at the snapshot tree to do some verification.
 async function logTree(tree: ISnapshotTree, storage: IDocumentStorageService) {
 	const newTree: any = {};
 	newTree.blobs = {};
@@ -303,11 +319,15 @@ async function logTree(tree: ISnapshotTree, storage: IDocumentStorageService) {
 	return newTree;
 }
 
+// This function is responsible for generating the summary.
 async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: ContainerRuntime) {
 	(readonlyRuntime as any).summarizerNode.startSummary(
 		readonlyRuntime.deltaManager.lastSequenceNumber,
 		new TelemetryNullLogger(),
 	);
+
+	// I wonder if we could make this summary incremental by making sure just the part that changed is dirty.
+	// There will be some work if we want to submit a summary foreign to us.
 	const appSummary = await readonlyRuntime.summarize({ fullTree: true });
 	readonlyRuntime.disposeFn();
 	const neverCancel = new Deferred<SummarizerStopReason>();
@@ -336,13 +356,10 @@ async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: Con
 			summarizerRuntime.disposeFn();
 		}
 	});
-	const waitForAck = new Deferred<ISummaryAck>();
-	summarizerRuntime.on("op", (op) => {
-		if (op.type === MessageType.SummaryAck) {
-			waitForAck.resolve(op.contents);
-		}
-	});
-	const ack = await waitForAck.promise;
+
+	const ack = await waitForSummarizeAck(summarizerRuntime);
+	// submits the "migration is finished op". There are several solutions, this is just a lazy implementation of one.
+	// I think putting the "migration is finished" on the summarize ack is best in terms of flow and reducing op counts.
 	summarizerRuntime.submitFinished("summaryHandle");
 	return ack;
 }
@@ -357,6 +374,7 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		[],
 	);
 
+	// Note the SharedCellToSharedMapFactory is here.
 	const dataObjectFactoryV1ToV2 = new DataObjectFactory(
 		TestDataObjectType,
 		DataObjectV2,
@@ -369,6 +387,8 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		[SharedMap.getFactory()],
 		[],
 	);
+
+	// This is the runtime factory before we introduce data migration.
 	const runtimeFactoryV1 = new ContainerRuntimeFactoryWithDefaultDataStore(
 		dataObjectFactoryV1,
 		[[dataObjectFactoryV1.type, Promise.resolve(dataObjectFactoryV1)]],
@@ -377,6 +397,7 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		defaultRuntimeOptions,
 	);
 
+	// This is the "conversion" factory
 	const runtimeFactoryV1ToV2 = new ContainerRuntimeFactoryWithDefaultDataStore(
 		dataObjectFactoryV1ToV2,
 		[[dataObjectFactoryV1ToV2.type, Promise.resolve(dataObjectFactoryV1ToV2)]],
@@ -385,6 +406,7 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		defaultRuntimeOptions,
 	);
 
+	// This is for verification purposes.
 	const runtimeFactoryV2 = new ContainerRuntimeFactoryWithDefaultDataStore(
 		dataObjectFactoryV2,
 		[[dataObjectFactoryV2.type, Promise.resolve(dataObjectFactoryV2)]],
@@ -394,7 +416,7 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 	);
 
 	const deferred = new Deferred<{
-		summarizer: ContainerRuntime;
+		summarizerRuntime: ContainerRuntime;
 		readonlyRuntime: ContainerRuntime;
 	}>();
 
@@ -408,15 +430,12 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 	const createV1Container = async (): Promise<IContainer> =>
 		provider.createContainer(runtimeFactoryV1, undefined, { package: "v1" });
 
-	const loadV2Container = async (summaryVersion: string): Promise<IContainer> =>
+	const loadV2Container = async (summaryVersion?: string): Promise<IContainer> =>
 		provider.loadContainer(
 			dataMigrationRuntimeFactoryV2,
 			{ options: { cache: false } },
 			{ headers: { [LoaderHeader.version]: summaryVersion, [LoaderHeader.cache]: false } },
-			[
-				[{ package: "v1" }, dataMigrationRuntimeFactoryV2],
-				[{ package: "v2" }, dataMigrationRuntimeFactoryV2],
-			],
+			[[{ package: "v1" }, dataMigrationRuntimeFactoryV2]],
 		);
 
 	const loadV2ContainerOnly = async (summaryVersion: string): Promise<IContainer> =>
@@ -432,34 +451,33 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 	});
 
 	it("Can migrate with ContainerRuntimeFactory", async () => {
-		// Setup container with basic dataObject
+		// Setup container with basic dataObject with a summary to load from
 		const container = await createV1Container();
-		const startObject = await requestFluidObject<DataObjectV1>(container, "/");
-		startObject.rootDDS.set("an", "op");
-		const waitForSummary = new Deferred<any>();
-		startObject.containerRuntime.on("op", (op) => {
-			if (op.type === MessageType.SummaryAck) {
-				waitForSummary.resolve(op.contents);
-			}
-		});
-		const firstSummaryAck = await waitForSummary.promise;
 		container.close();
-		const transitionContainer = await loadV2Container(firstSummaryAck.handle);
+
+		const transitionContainer = await loadV2Container(); // firstSummaryAck.handle
 		await waitForContainerConnection(transitionContainer);
 		await provider.ensureSynchronized();
 		const dObject = await requestFluidObject<DataObjectV1>(transitionContainer, "/");
+
+		// This sends the "quorum" proposal op. This doesn't do everything we want it to do, but it's not important as that part is relatively easy.
 		dObject.containerRuntime.submitTransition();
-		const { summarizer, readonlyRuntime } = await deferred.promise;
-		const waitForSummarizerRuntimeConnection = new Deferred<void>();
-		summarizer.on("connected", () => {
-			waitForSummarizerRuntimeConnection.resolve();
-		});
-		await waitForSummarizerRuntimeConnection.promise;
-		const migrateAck = await migrate(summarizer, readonlyRuntime);
+		// This gets both the summarization runtime and detached/readonly runtime. This code isn't production ready or really readable.
+		// Above this deferred promise is passed to the runtime factory which then resolves the promise once it has created all the runtimes.
+		const { summarizerRuntime, readonlyRuntime } = await deferred.promise;
+		await waitForConnectedEvent(summarizerRuntime);
+
+		// This loads the readonly runtime and then generates a summary
+		// It then submits that summary with the summarizer runtime.
+		const migrateAck = await migrate(summarizerRuntime, readonlyRuntime);
+
+		// Grab the new summary from the summary ack
 		const summaryVersion = migrateAck.handle;
 		transitionContainer.close();
 		assert(container.closed, "Starting container should be closed");
 		assert(transitionContainer.closed, "Transition container should have closed");
+
+		// Load the container from the ack and do some verification that this container is in the v2 state.
 		const migratedContainer = await loadV2ContainerOnly(summaryVersion);
 		const migratedDataObject = await requestFluidObject<DataObjectV2>(migratedContainer, "/");
 		assert(
@@ -472,6 +490,10 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 	});
 });
 
+// /////// Start of Prototype 2
+
+// Not sure what the right implementation here is
+// Essentially the goal is to pretend to be the service when processing ops.
 class MigrationQueue {
 	private readonly actions: (() => void)[] = [];
 	public push(action: () => void) {
@@ -485,6 +507,7 @@ class MigrationQueue {
 	}
 }
 
+// This is the container context that has two modes - migration mode and regular mode.
 class MigrationContainerContext implements IContainerContext {
 	public migrationOn: boolean = false;
 	public queue: MigrationQueue = new MigrationQueue();
@@ -618,7 +641,12 @@ class ContainerRuntimeFactoryWithSummarizerDataMigration extends RuntimeFactoryH
 		this.clientDetailsType = context.clientDetails.type;
 		if (this.clientDetailsType === summarizerClientType) {
 			const migrationContext = new MigrationContainerContext(context);
-			return this.containerRuntimeFactory.preInitialize(migrationContext, existing);
+			const runtime = await this.containerRuntimeFactory.preInitialize(
+				migrationContext,
+				existing,
+			);
+			migrationContext.setRuntime(runtime);
+			return runtime;
 		}
 
 		return this.containerRuntimeFactory.preInitialize(context, existing);
@@ -779,6 +807,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		// v1 container
 		const c1 = await provider.createContainer(runtimeFactoryV1);
 		const do1 = await requestFluidObject<RootDOV1>(c1, "/");
+		// Note this op and summary was sent so we don't hit assert 0x251.
 		do1.rootDDS.set("some", "op");
 		await waitForSummarizeAck(c1);
 		c1.close();
@@ -786,7 +815,8 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		// this test skips detecting that data migration needs to occur.
 		// That was already proven in the previous part, it's not worth figuring out as that part is relatively easy.
 
-		// Migrate
+		// This gets the summarizer with the conversion code.
+		// Specifically haven't spent time on figuring out how I would get the summarization runtime as that's relatively trivial.
 		const c2 = await provider.loadContainer(conversionRuntimeFactory);
 		await waitForContainerConnection(c2);
 		const do2 = await requestFluidObject<RootDOV1>(c2, "/");
@@ -796,14 +826,14 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		const summarizer = (scr3 as any).summarizer;
 		const sdo3 = await requestFluidObject<RootDOV1>(scr3, "/");
 
-		// conversion code - doesn't do replace
-		// Note, I needed to actually do this as I was running into 0x173 (I have no idea why, wasn't worth investigating)
+		// Note, needed to turn on migration mode to avoid 0x173 (I have no idea why, wasn't worth investigating)
+		// The turning on of the migration api should be changed here as this is a prototype.
 		const migrationContext = scr3.context as MigrationContainerContext;
 		migrationContext.migrationOn = true;
-		migrationContext.setRuntime(scr3);
-		// Record the last known deltaManager sequence number
+		// Record the last known deltaManager sequence number for verification purposes.
 		const lastKnownNumber = scr3.deltaManager.lastSequenceNumber;
 
+		// Conversion code
 		const sdo3Converted = await rootDOFactoryV2.createInstance(scr3);
 		for (const [key, value] of sdo3.rootDDS.entries()) {
 			sdo3Converted.rootDDS.set(key, value);
@@ -812,11 +842,15 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 			sdo3Converted.rootDDS.set(key, scriptDO.stringContent);
 		}
 		sdo3.rootDDS.set("handle", sdo3Converted.handle);
+		// End of conversion code
+		// This was added here so GC wouldn't complain during summarization.
 		scr3.addedGCOutboundReference(sdo3.rootDDS.handle, sdo3Converted.handle);
-		// need to wait for the outbox and inbox to be empty / all the ops get processed. Otherwise the test passes.
-		// Because the ops aren't all processed we get GC unknown outbound routes event which is totally fine.
+		// I needed this to send out all the ops so we are not in a partial batch state when summarizing.
 		(scr3 as any).flush();
+		// This makes the runtime process all the local ops it sent.
 		migrationContext.process();
+
+		// This check verifies that the sequence number hasn't changed. I'm not sure I'm grabbing the right number here.
 		assert(
 			lastKnownNumber === scr3.deltaManager.lastSequenceNumber,
 			"No sequence numbers should have been processed by the delta manager.",
@@ -824,8 +858,8 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 
 		// submit the summary and then turn off the migration, maybe close the summarizer, doesn't really matter.
 		const { summaryRefSeq, summaryVersion } = await summarizeNow(summarizer);
-		// some check here for incremental summary
-		// some check here to see that the summaryRefSeq did not go crazy.
+		// some check here for incremental summary - I've manually done this by console logging.
+		// sequence number check here.
 		assert.equal(
 			lastKnownNumber,
 			summaryRefSeq,
@@ -833,7 +867,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		);
 		(scr3.context as any).migrateOn = false;
 
-		// validation
+		// validation that we can load the container in the v2 state
 		const c4 = await provider.loadContainer(runtimeFactoryV1ToV2, undefined, {
 			headers: { [LoaderHeader.version]: summaryVersion },
 		});
