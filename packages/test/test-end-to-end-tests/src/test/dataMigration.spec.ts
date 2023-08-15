@@ -62,9 +62,25 @@ import {
 } from "@fluidframework/protocol-definitions";
 import { SharedString } from "@fluidframework/sequence";
 
+// Might be useful if you want to look at the snapshot tree to do some verification.
+async function logTree(tree: ISnapshotTree, storage: IDocumentStorageService) {
+	const newTree: any = {};
+	newTree.blobs = {};
+	newTree.trees = {};
+	for (const [blobName, blobId] of Object.entries(tree.blobs)) {
+		const content = await readAndParse(storage, blobId);
+		newTree.blobs[blobName] = content;
+	}
+	for (const [treeName, treeNode] of Object.entries(tree.trees)) {
+		newTree.trees[treeName] = await logTree(treeNode, storage);
+	}
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+	return newTree;
+}
+
 async function waitForSummarizeAck(emitter: ContainerRuntime | IContainer): Promise<ISummaryAck> {
 	const waitForEventDeferred = new Deferred<ISummaryAck>();
-	emitter.on("op", (op: ISequencedDocumentMessage) => {
+	emitter.once("op", (op: ISequencedDocumentMessage) => {
 		if (op.type === MessageType.SummaryAck) {
 			waitForEventDeferred.resolve(op.contents as ISummaryAck);
 		}
@@ -74,7 +90,7 @@ async function waitForSummarizeAck(emitter: ContainerRuntime | IContainer): Prom
 
 async function waitForConnectedEvent(emitter: ContainerRuntime | IContainer): Promise<void> {
 	const waitForEventDeferred = new Deferred<void>();
-	emitter.on("connected", () => {
+	emitter.once("connected", () => {
 		waitForEventDeferred.resolve();
 	});
 	return waitForEventDeferred.promise;
@@ -206,7 +222,6 @@ function createReadOnlyContext(
 // This allows us to inject the readonly context when we create the "detached/readonly" container runtime
 class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 	private _currentRuntimeFactory?: ContainerRuntimeFactoryWithDefaultDataStore;
-	private oldRuntime?: ContainerRuntime;
 	private get currentRuntimeFactory(): ContainerRuntimeFactoryWithDefaultDataStore {
 		assert(
 			this._currentRuntimeFactory !== undefined,
@@ -214,17 +229,19 @@ class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 		);
 		return this._currentRuntimeFactory;
 	}
+	private readonly _waitForMigrationRuntimes = new Deferred<{
+		summarizerRuntime: ContainerRuntime;
+		readonlyRuntime: ContainerRuntime;
+	}>();
+	public get waitForMigrationRuntimes() {
+		return this._waitForMigrationRuntimes.promise;
+	}
 
 	private clientDetailsType?: string;
 
 	constructor(
 		private readonly v1: ContainerRuntimeFactoryWithDefaultDataStore,
 		private readonly v1ToV2: ContainerRuntimeFactoryWithDefaultDataStore,
-		private readonly v2: ContainerRuntimeFactoryWithDefaultDataStore,
-		private readonly deferred: Deferred<{
-			summarizerRuntime: ContainerRuntime;
-			readonlyRuntime: ContainerRuntime;
-		}>,
 	) {
 		super();
 	}
@@ -233,12 +250,8 @@ class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 		existing: boolean,
 	): Promise<ContainerRuntime> {
 		this.clientDetailsType = context.clientDetails.type;
-		const codeDetails = context.getSpecifiedCodeDetails
-			? context.getSpecifiedCodeDetails()
-			: undefined;
-		assert(codeDetails !== undefined, "get code details failed");
 
-		this._currentRuntimeFactory = codeDetails.package === "v1" ? this.v1 : this.v2;
+		this._currentRuntimeFactory = this.v1;
 		if (this.clientDetailsType === detachedClientType) {
 			const detachedContext = createReadOnlyContext(context, "v2");
 			this._currentRuntimeFactory = this.v1ToV2;
@@ -260,9 +273,8 @@ class ContainerRuntimeFactoryWithDataMigration extends RuntimeFactoryHelper {
 		await this.currentRuntimeFactory.hasInitialized(runtime);
 
 		if (this.clientDetailsType === summarizerClientType) {
-			this.oldRuntime = runtime;
 			const readonlyRuntime = await runtime.loadDetachedAndTransitionFn();
-			this.deferred.resolve({ summarizerRuntime: this.oldRuntime, readonlyRuntime });
+			this._waitForMigrationRuntimes.resolve({ summarizerRuntime: runtime, readonlyRuntime });
 		}
 	}
 }
@@ -301,22 +313,6 @@ class SharedCellToSharedMapFactory implements IChannelFactory {
 	public create(document: IFluidDataStoreRuntime, id: string): SharedMap {
 		throw new Error("Shouldn't be making a shared cell");
 	}
-}
-
-// Might be useful if you want to look at the snapshot tree to do some verification.
-async function logTree(tree: ISnapshotTree, storage: IDocumentStorageService) {
-	const newTree: any = {};
-	newTree.blobs = {};
-	newTree.trees = {};
-	for (const [blobName, blobId] of Object.entries(tree.blobs)) {
-		const content = await readAndParse(storage, blobId);
-		newTree.blobs[blobName] = content;
-	}
-	for (const [treeName, treeNode] of Object.entries(tree.trees)) {
-		newTree.trees[treeName] = await logTree(treeNode, storage);
-	}
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-return
-	return newTree;
 }
 
 // This function is responsible for generating the summary.
@@ -360,7 +356,7 @@ async function migrate(summarizerRuntime: ContainerRuntime, readonlyRuntime: Con
 	const ack = await waitForSummarizeAck(summarizerRuntime);
 	// submits the "migration is finished op". There are several solutions, this is just a lazy implementation of one.
 	// I think putting the "migration is finished" on the summarize ack is best in terms of flow and reducing op counts.
-	summarizerRuntime.submitFinished("summaryHandle");
+	summarizerRuntime.finishProposal("summaryHandle");
 	return ack;
 }
 
@@ -415,36 +411,23 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 		defaultRuntimeOptions,
 	);
 
-	const deferred = new Deferred<{
-		summarizerRuntime: ContainerRuntime;
-		readonlyRuntime: ContainerRuntime;
-	}>();
-
 	const dataMigrationRuntimeFactoryV2 = new ContainerRuntimeFactoryWithDataMigration(
 		runtimeFactoryV1,
 		runtimeFactoryV1ToV2,
-		runtimeFactoryV2,
-		deferred,
 	);
 
 	const createV1Container = async (): Promise<IContainer> =>
-		provider.createContainer(runtimeFactoryV1, undefined, { package: "v1" });
+		provider.createContainer(runtimeFactoryV1);
 
-	const loadV2Container = async (summaryVersion?: string): Promise<IContainer> =>
-		provider.loadContainer(
-			dataMigrationRuntimeFactoryV2,
-			{ options: { cache: false } },
-			{ headers: { [LoaderHeader.version]: summaryVersion, [LoaderHeader.cache]: false } },
-			[[{ package: "v1" }, dataMigrationRuntimeFactoryV2]],
-		);
+	const loadV2TransitionContainer = async (summaryVersion?: string): Promise<IContainer> =>
+		provider.loadContainer(dataMigrationRuntimeFactoryV2, undefined, {
+			headers: { [LoaderHeader.version]: summaryVersion },
+		});
 
 	const loadV2ContainerOnly = async (summaryVersion: string): Promise<IContainer> =>
-		provider.loadContainer(
-			runtimeFactoryV2,
-			{ options: { cache: false } },
-			{ headers: { [LoaderHeader.version]: summaryVersion, [LoaderHeader.cache]: false } },
-			[[{ package: "v1" }, runtimeFactoryV2]],
-		);
+		provider.loadContainer(runtimeFactoryV2, undefined, {
+			headers: { [LoaderHeader.version]: summaryVersion },
+		});
 
 	beforeEach(async () => {
 		provider = getTestObjectProvider({ syncSummarizer: true });
@@ -452,41 +435,42 @@ describeNoCompat("Data Migration is possible", (getTestObjectProvider) => {
 
 	it("Can migrate with ContainerRuntimeFactory", async () => {
 		// Setup container with basic dataObject with a summary to load from
-		const container = await createV1Container();
-		container.close();
+		const container1 = await createV1Container();
+		container1.close();
 
-		const transitionContainer = await loadV2Container(); // firstSummaryAck.handle
-		await waitForContainerConnection(transitionContainer);
+		const container2 = await loadV2TransitionContainer();
+		await waitForContainerConnection(container2);
 		await provider.ensureSynchronized();
-		const dObject = await requestFluidObject<DataObjectV1>(transitionContainer, "/");
+		const dataObject2 = await requestFluidObject<DataObjectV1>(container2, "/");
 
 		// This sends the "quorum" proposal op. This doesn't do everything we want it to do, but it's not important as that part is relatively easy.
-		dObject.containerRuntime.submitTransition();
+		dataObject2.containerRuntime.startProposal();
 		// This gets both the summarization runtime and detached/readonly runtime. This code isn't production ready or really readable.
 		// Above this deferred promise is passed to the runtime factory which then resolves the promise once it has created all the runtimes.
-		const { summarizerRuntime, readonlyRuntime } = await deferred.promise;
-		await waitForConnectedEvent(summarizerRuntime);
+		const { summarizerRuntime: summarizerRuntime2, readonlyRuntime: readonlyRuntime2 } =
+			await dataMigrationRuntimeFactoryV2.waitForMigrationRuntimes;
+		await waitForConnectedEvent(summarizerRuntime2);
 
 		// This loads the readonly runtime and then generates a summary
 		// It then submits that summary with the summarizer runtime.
-		const migrateAck = await migrate(summarizerRuntime, readonlyRuntime);
+		const migrateAck = await migrate(summarizerRuntime2, readonlyRuntime2);
 
 		// Grab the new summary from the summary ack
-		const summaryVersion = migrateAck.handle;
-		transitionContainer.close();
-		assert(container.closed, "Starting container should be closed");
-		assert(transitionContainer.closed, "Transition container should have closed");
+		const summaryVersion2 = migrateAck.handle;
+		container2.close();
+		assert(container1.closed, "Starting container should be closed");
+		assert(container2.closed, "Transition container should have closed");
 
 		// Load the container from the ack and do some verification that this container is in the v2 state.
-		const migratedContainer = await loadV2ContainerOnly(summaryVersion);
-		const migratedDataObject = await requestFluidObject<DataObjectV2>(migratedContainer, "/");
+		const container3 = await loadV2ContainerOnly(summaryVersion2);
+		const dataObject3 = await requestFluidObject<DataObjectV2>(container3, "/");
 		assert(
-			migratedDataObject.getter.get(cellKey) === "abc",
+			dataObject3.getter.get(cellKey) === "abc",
 			"Document should have transitioned to v2!",
 		);
-		migratedDataObject.getter.set("some", "value");
+		dataObject3.getter.set("some", "value");
 		await provider.ensureSynchronized();
-		assert(!migratedContainer.closed, "Migrated container should be in good shape");
+		assert(!container3.closed, "Migrated container should be in good shape");
 	});
 });
 

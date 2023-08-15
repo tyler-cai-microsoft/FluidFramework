@@ -2894,12 +2894,12 @@ export class ContainerRuntime
 		);
 	}
 
-	public submitTransition() {
+	public startProposal() {
 		this.verifyNotClosed();
 		this.submit({ type: ContainerMessageType.Propose, contents: "" });
 	}
 
-	public submitFinished(summaryHandle: string) {
+	public finishProposal(summaryHandle: string) {
 		this.verifyNotClosed();
 		this.submit({ type: ContainerMessageType.Accept, contents: { summaryHandle } });
 	}
