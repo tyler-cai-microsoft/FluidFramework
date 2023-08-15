@@ -2450,6 +2450,13 @@ export class ContainerRuntime
 		return this.dataStores.createDetachedDataStoreCore(pkg, false);
 	}
 
+	public async replaceDataStoreContext(
+		pkg: Readonly<string[]>,
+		id: string,
+	): Promise<IFluidDataStoreContextDetached> {
+		return this.dataStores.replaceDataStoreContext(pkg, id);
+	}
+
 	public async createDataStore(pkg: string | string[]): Promise<IDataStore> {
 		const id = uuid();
 		return channelToDataStore(

@@ -375,6 +375,16 @@ export class DataStores implements IDisposable {
 		return context;
 	}
 
+	public async replaceDataStoreContext(pkg: Readonly<string[]>, id: string) {
+		const oldDataStoreContext = this.contexts.get(id);
+		assert(oldDataStoreContext !== undefined, "Expected to copy an existing data store");
+		const isRoot = await oldDataStoreContext.isRoot();
+		oldDataStoreContext.delete();
+		this.contexts.delete(id);
+		this.deleteChildSummarizerNodeFn(id);
+		return this.createDetachedDataStoreCore(pkg, isRoot, id);
+	}
+
 	public _createFluidDataStoreContext(pkg: string[], id: string, props?: any) {
 		assert(!id.includes("/"), 0x30d /* Id cannot contain slashes */);
 		const context = new LocalFluidDataStoreContext({
