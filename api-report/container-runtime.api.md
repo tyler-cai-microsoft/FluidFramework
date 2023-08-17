@@ -77,6 +77,8 @@ export enum CompressionAlgorithms {
 // @public (undocumented)
 export enum ContainerMessageType {
     // (undocumented)
+    Accept = "accept",
+    // (undocumented)
     Alias = "alias",
     // (undocumented)
     Attach = "attach",
@@ -87,6 +89,8 @@ export enum ContainerMessageType {
     // (undocumented)
     FluidDataStoreOp = "component",
     IdAllocation = "idAllocation",
+    // (undocumented)
+    Propose = "propose",
     // (undocumented)
     Rejoin = "rejoin"
 }
@@ -118,6 +122,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     // (undocumented)
     get connected(): boolean;
     // (undocumented)
+    readonly context: IContainerContext;
+    // (undocumented)
     createDataStore(pkg: string | string[]): Promise<IDataStore>;
     // @internal @deprecated (undocumented)
     _createDataStoreWithProps(pkg: string | string[], props?: any, id?: string): Promise<IDataStore>;
@@ -139,6 +145,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     // (undocumented)
     readonly enqueueSummarize: ISummarizer["enqueueSummarize"];
     ensureNoDataModelChanges<T>(callback: () => T): T;
+    // (undocumented)
+    finishProposal(summaryHandle: string): void;
     // (undocumented)
     get flushMode(): FlushMode;
     formRequestDetachedRuntimeFn(): Promise<void>;
@@ -175,7 +183,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     // @deprecated (undocumented)
     static load(context: IContainerContext, registryEntries: NamedFluidDataStoreRegistryEntries, requestHandler?: (request: IRequest, runtime: IContainerRuntime) => Promise<IResponse>, runtimeOptions?: IContainerRuntimeOptions, containerScope?: FluidObject, existing?: boolean, containerRuntimeCtor?: typeof ContainerRuntime): Promise<ContainerRuntime>;
     // (undocumented)
-    readonly loadDetachedAndTransitionFn: () => Promise<void>;
+    readonly loadDetachedAndTransitionFn: () => Promise<ContainerRuntime>;
     static loadRuntime(params: {
         context: IContainerContext;
         registryEntries: NamedFluidDataStoreRegistryEntries;
@@ -201,6 +209,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     // (undocumented)
     processSignal(message: ISignalMessage, local: boolean): void;
     refreshLatestSummaryAck(options: IRefreshSummaryAckOptions): Promise<void>;
+    // (undocumented)
+    replaceDataStoreContext(pkg: Readonly<string[]>, id: string): Promise<IFluidDataStoreContextDetached>;
     // @deprecated
     request(request: IRequest): Promise<IResponse>;
     resolveHandle(request: IRequest): Promise<IResponse>;
@@ -212,6 +222,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     setAttachState(attachState: AttachState.Attaching | AttachState.Attached): void;
     // (undocumented)
     setConnectionState(connected: boolean, clientId?: string): void;
+    // (undocumented)
+    startProposal(): void;
     // (undocumented)
     get storage(): IDocumentStorageService;
     // (undocumented)
@@ -241,6 +253,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     updateUsedRoutes(usedRoutes: string[]): void;
     // (undocumented)
     uploadBlob(blob: ArrayBufferLike, signal?: AbortSignal): Promise<IFluidHandle<ArrayBufferLike>>;
+    // (undocumented)
+    waitingForTransition: boolean;
 }
 
 // @public
@@ -483,6 +497,8 @@ export interface ISubmitSummaryOpResult extends Omit<IUploadSummaryResult, "stag
 // @public (undocumented)
 export interface ISubmitSummaryOptions extends ISummarizeOptions {
     readonly cancellationToken: ISummaryCancellationToken;
+    // (undocumented)
+    readonly summarizeResult?: ISummaryTreeWithStats;
     readonly summaryLogger: ITelemetryLoggerExt;
 }
 
@@ -710,6 +726,9 @@ export class Summarizer extends EventEmitter implements ISummarizer {
     // (undocumented)
     readonly summaryCollection: SummaryCollection;
 }
+
+// @public (undocumented)
+export const summarizerClientType = "summarizer";
 
 // @public (undocumented)
 export type SummarizeResultPart<TSuccess, TFailure = undefined> = {

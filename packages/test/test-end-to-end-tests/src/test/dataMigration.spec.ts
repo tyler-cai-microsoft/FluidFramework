@@ -593,6 +593,7 @@ class MigrationContainerContext implements IContainerContext {
 
 	// All these should be whatever the context originally returns
 	options: ILoaderOptions = this.context.options;
+	readonly id: string = this.context.id;
 	get clientId(): string | undefined {
 		return this.context.clientId;
 	}

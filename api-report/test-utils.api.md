@@ -187,7 +187,7 @@ export interface ITestObjectProvider {
     // (undocumented)
     ensureSynchronized(timeoutDuration?: number): Promise<void>;
     // (undocumented)
-    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader, codeDetails?: IFluidCodeDetails): Promise<IContainer>;
+    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader, packageEntries?: Iterable<[IFluidCodeDetails, fluidEntryPoint]>): Promise<IContainer>;
     // (undocumented)
     loadTestContainer(testContainerConfig?: ITestContainerConfig, requestHeader?: IRequestHeader): Promise<IContainer>;
     // (undocumented)
@@ -310,7 +310,7 @@ export class TestObjectProvider implements ITestObjectProvider {
     // (undocumented)
     ensureSynchronized(): Promise<void>;
     // (undocumented)
-    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader, codeDetails?: IFluidCodeDetails): Promise<IContainer>;
+    loadContainer(entryPoint: fluidEntryPoint, loaderProps?: Partial<ILoaderProps>, requestHeader?: IRequestHeader, packageEntries?: Iterable<[IFluidCodeDetails, fluidEntryPoint]>): Promise<IContainer>;
     // (undocumented)
     readonly LoaderConstructor: typeof Loader;
     loadTestContainer(testContainerConfig?: ITestContainerConfig, requestHeader?: IRequestHeader): Promise<IContainer>;
