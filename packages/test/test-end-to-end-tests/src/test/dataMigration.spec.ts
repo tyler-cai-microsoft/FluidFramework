@@ -446,6 +446,9 @@ class ContainerRuntimeFactoryManager extends RuntimeFactoryHelper {
 	}
 }
 
+// ScriptDO is the example "nested component"
+// RootDOV1 is the v1 "parent component"
+// RootDOV2 is the v2 "parent component"
 const scriptType = "scriptType";
 const sharedStringKey = "sharedStringKey";
 class ScriptDO extends DataObject {
@@ -474,7 +477,7 @@ const rootType1 = "rootType1";
 const rootType2 = "rootType2";
 
 // The number of "rows/columns" this is a lazy implementation
-const scripts = 3;
+const scriptDOCount = 3;
 class RootDOV1 extends DataObject {
 	public get containerRuntime() {
 		return this.context.containerRuntime as ContainerRuntime;
@@ -487,7 +490,7 @@ class RootDOV1 extends DataObject {
 	}
 
 	protected async initializingFirstTime(props?: any): Promise<void> {
-		for (let i = 0; i < scripts; i++) {
+		for (let i = 0; i < scriptDOCount; i++) {
 			const ds = await this.containerRuntime.createDataStore(scriptType);
 			const fluidObject = await ds.entryPoint?.get();
 			assert(fluidObject !== undefined, "should have created a data object");
@@ -506,7 +509,7 @@ class RootDOV2 extends DataObject {
 	}
 	public get data() {
 		const array: string[] = [];
-		for (let i = 0; i < scripts; i++) {
+		for (let i = 0; i < scriptDOCount; i++) {
 			const data = this.root.get<string>(`${i}`);
 			assert(data !== undefined, "Data should have been stored");
 			array.push(data);
@@ -516,14 +519,14 @@ class RootDOV2 extends DataObject {
 
 	public modifyData(value: string) {
 		const array: string[] = [];
-		for (let i = 0; i < scripts; i++) {
+		for (let i = 0; i < scriptDOCount; i++) {
 			this.root.set(`${i}`, value);
 		}
 		return array;
 	}
 
 	protected async initializingFirstTime(props?: any): Promise<void> {
-		for (let i = 0; i < scripts; i++) {
+		for (let i = 0; i < scriptDOCount; i++) {
 			this.root.set(`${i}`, "");
 		}
 	}
@@ -629,7 +632,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		assert(rootDataObject3Handle !== undefined, "should be able to get the old runtime handle");
 		const dataObject3 = (await rootDataObject3Handle.get()) as MigrationDataObject;
 
-		for (let i = 0; i < scripts; i++) {
+		for (let i = 0; i < scriptDOCount; i++) {
 			const key = `${i}`;
 			const scriptDO = await dataObject3._root
 				.get<IFluidHandle<MigrationDataObject>>(key)
@@ -696,8 +699,8 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		assert(rootDataObject4.rootDDS.get("some") === "op", "first op lost!");
 		assert(rootDataObject4.rootDDS.get("another") === "op", "second op lost!");
 		assert(
-			rootDataObject4.data.length === scripts,
-			`Should have ${scripts} not ${rootDataObject4.data.length}`,
+			rootDataObject4.data.length === scriptDOCount,
+			`Should have ${scriptDOCount} not ${rootDataObject4.data.length}`,
 		);
 
 		// v2 can send ops
