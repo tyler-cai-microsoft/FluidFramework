@@ -61,6 +61,13 @@ export const AllowTombstoneRequestHeaderKey = "allowTombstone";
 // @public
 export function assertIsStableId(stableId: string): StableId;
 
+// @internal
+export type CompatModeBehavior =
+/** Ignore the op. It won't be persisted if this client summarizes */
+"Ignore"
+/** Fail processing immediately. (The container will close) */
+| "FailToProcess";
+
 // @public
 export enum CompressionAlgorithms {
     // (undocumented)
@@ -236,11 +243,11 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     uploadBlob(blob: ArrayBufferLike, signal?: AbortSignal): Promise<IFluidHandle<ArrayBufferLike>>;
 }
 
-// @public (undocumented)
+// @public
 export interface ContainerRuntimeMessage {
-    // (undocumented)
+    // Warning: (ae-incompatible-release-tags) The symbol "compatDetails" is marked as @public, but its signature references "IContainerRuntimeMessageCompatDetails" which is marked as @internal
+    compatDetails?: IContainerRuntimeMessageCompatDetails;
     contents: any;
-    // (undocumented)
     type: ContainerMessageType;
 }
 
@@ -361,6 +368,11 @@ export interface IConnectableRuntime {
     once(event: "connected" | "disconnected" | "dispose", listener: () => void): this;
 }
 
+// @internal
+export interface IContainerRuntimeMessageCompatDetails {
+    behavior: CompatModeBehavior;
+}
+
 // @public
 export interface IContainerRuntimeOptions {
     readonly chunkSizeInBytes?: number;
@@ -428,7 +440,7 @@ export interface IGenerateSummaryTreeResult extends Omit<IBaseSummarizeResult, "
 }
 
 // @public (undocumented)
-export interface INackSummaryResult {
+export interface INackSummaryResult extends IRetriableFailureResult {
     // (undocumented)
     readonly ackNackDuration: number;
     // (undocumented)
@@ -446,6 +458,12 @@ export interface IRefreshSummaryAckOptions {
     readonly proposalHandle: string | undefined;
     readonly summaryLogger: ITelemetryLoggerExt;
     readonly summaryRefSeq: number;
+}
+
+// @public
+export interface IRetriableFailureResult {
+    // (undocumented)
+    readonly retryAfterSeconds?: number;
 }
 
 // @public @deprecated (undocumented)
@@ -660,7 +678,7 @@ export enum RuntimeMessage {
 }
 
 // @public
-export interface SubmitSummaryFailureData {
+export interface SubmitSummaryFailureData extends IRetriableFailureResult {
     // (undocumented)
     stage: SummaryStage;
 }
@@ -702,7 +720,6 @@ export type SummarizeResultPart<TSuccess, TFailure = undefined> = {
     data: TFailure | undefined;
     message: string;
     error: any;
-    retryAfterSeconds?: number;
 };
 
 // @public (undocumented)
