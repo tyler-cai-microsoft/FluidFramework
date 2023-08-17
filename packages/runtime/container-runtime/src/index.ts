@@ -69,6 +69,7 @@ export {
 	OpActionEventName,
 	ICancellableSummarizerController,
 	SubmitSummaryFailureData,
+	summarizerClientType,
 	SummaryStage,
 	IRetriableFailureResult,
 } from "./summary";
