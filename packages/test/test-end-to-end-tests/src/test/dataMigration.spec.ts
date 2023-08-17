@@ -567,6 +567,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		summaryRuntimeOptions,
 	);
 
+	// I am passing v2 here as it has registry info for both v1 and v2.
 	const migrationRuntimeFactory = new ContainerRuntimeFactoryManager(
 		runtimeFactoryV2,
 		registryV2,
@@ -579,33 +580,37 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 
 	it("Can migrate with ContainerRuntimeFactory with just summarizer", async () => {
 		// v1 container
-		const c1 = await provider.createContainer(runtimeFactoryV1);
-		const do1 = await requestFluidObject<RootDOV1>(c1, "/");
-		const datastore1 = await do1.containerRuntime.createDataStore(rootDOFactoryV1.type);
+		const container1 = await provider.createContainer(runtimeFactoryV1);
+		const rootDataObject1 = await requestFluidObject<RootDOV1>(container1, "/");
+		const datastore1 = await rootDataObject1.containerRuntime.createDataStore(
+			rootDOFactoryV1.type,
+		);
 		await datastore1.trySetAlias("unchanged");
 		// Note this op and summary was sent so we don't hit assert 0x251.
-		do1.rootDDS.set("some", "op");
-		await waitForSummarizeAck(c1);
+		rootDataObject1.rootDDS.set("some", "op");
+		await waitForSummarizeAck(container1);
 		await provider.ensureSynchronized();
-		c1.close();
+		container1.close();
 
 		// this test skips detecting that data migration needs to occur.
 		// That was already proven in the previous part, it's not worth figuring out as that part is relatively easy.
 
 		// This gets the summarizer with the conversion code.
 		// Specifically haven't spent time on figuring out how I would get the summarization runtime as that's relatively trivial.
-		const c2 = await provider.loadContainer(migrationRuntimeFactory);
-		await waitForContainerConnection(c2);
-		const do2 = await requestFluidObject<RootDOV1>(c2, "/");
-		do2.rootDDS.set("another", "op");
+		const container2 = await provider.loadContainer(migrationRuntimeFactory);
+		await waitForContainerConnection(container2);
+		const rootDataObject2 = await requestFluidObject<RootDOV1>(container2, "/");
+		rootDataObject2.rootDDS.set("another", "op");
 		(migrationRuntimeFactory.interactiveRuntime as any).summaryManager.forceSummarization();
-		const scr3 = await migrationRuntimeFactory.summarizerRuntime;
+		const summarizerContainerRuntime3 = await migrationRuntimeFactory.summarizerRuntime;
 
 		// Grab the id of the unchanged data object to do incremental summary verification.
-		const unchangedHandle3 = await scr3.getAliasedDataStoreEntryPoint("unchanged");
+		const unchangedHandle3 = await summarizerContainerRuntime3.getAliasedDataStoreEntryPoint(
+			"unchanged",
+		);
 		assert(unchangedHandle3 !== undefined, "should be able to get the handle");
-		const unchangedDO3 = (await unchangedHandle3.get()) as IFluidDataStoreRuntime;
-		const unchangedId = unchangedDO3.id;
+		const unchangedDataObject3 = (await unchangedHandle3.get()) as IFluidDataStoreRuntime;
+		const unchangedId = unchangedDataObject3.id;
 
 		// Note, needed to turn on migration mode to avoid 0x173 (I have no idea why, wasn't worth investigating)
 		// The turning on of the migration api should be changed here as this is a prototype.
@@ -615,41 +620,49 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		// Turning migration on and off can be done via submitting and processing an op, I've skipped that part here
 		migrationContext.migrationOn = true;
 		// Record the last known deltaManager sequence number for verification purposes.
-		const lastKnownNumber = scr3.deltaManager.lastSequenceNumber;
+		const preMigrationSequenceNumber =
+			summarizerContainerRuntime3.deltaManager.lastSequenceNumber;
 
 		// Conversion code
-		const do3Handle = await scr3.getAliasedDataStoreEntryPoint("default");
-		assert(do3Handle !== undefined, "should be able to get the old runtime handle");
-		const do3 = (await do3Handle.get()) as MigrationDataObject;
+		const rootDataObject3Handle =
+			await summarizerContainerRuntime3.getAliasedDataStoreEntryPoint("default");
+		assert(rootDataObject3Handle !== undefined, "should be able to get the old runtime handle");
+		const dataObject3 = (await rootDataObject3Handle.get()) as MigrationDataObject;
 
 		for (let i = 0; i < scripts; i++) {
 			const key = `${i}`;
-			const scriptDO = await do3._root.get<IFluidHandle<MigrationDataObject>>(key)?.get();
+			const scriptDO = await dataObject3._root
+				.get<IFluidHandle<MigrationDataObject>>(key)
+				?.get();
 			assert(scriptDO !== undefined, "Script DO missing!");
 			const scriptSharedString = await scriptDO._root
 				.get<IFluidHandle<SharedString>>(sharedStringKey)
 				?.get();
 			assert(scriptSharedString !== undefined, "Script shared string missing!");
-			do3._root.set(key, scriptSharedString.getText());
+			dataObject3._root.set(key, scriptSharedString.getText());
 		}
-		do3.changeType([rootDOFactoryV2.type]);
+		dataObject3.changeType([rootDOFactoryV2.type]);
 
 		// End of conversion code
 		// Learning note: calling addedGCOutboundReference might be useful in cases we want to do create new DOs and reference them.
 		// I needed this to send out all the ops so we are not in a partial batch state when summarizing. Otherwise we assert
-		(scr3 as any).flush();
+		(summarizerContainerRuntime3 as any).flush();
 		// This makes the runtime process all the local ops it sent.
 		migrationContext.process();
 
 		// First sequence number check. I'm not sure I'm asserting on the right numbers here
 		assert(
-			lastKnownNumber === scr3.deltaManager.lastSequenceNumber,
+			preMigrationSequenceNumber ===
+				summarizerContainerRuntime3.deltaManager.lastSequenceNumber,
 			"No sequence numbers should have been processed by the delta manager.",
 		);
 
 		// submit the summary and then turn off the migration, maybe close the summarizer, doesn't really matter.
-		assert(scr3.getEntryPoint !== undefined, "should have a summarizer entry point");
-		const summarizer = await scr3.getEntryPoint();
+		assert(
+			summarizerContainerRuntime3.getEntryPoint !== undefined,
+			"should have a summarizer entry point",
+		);
+		const summarizer = await summarizerContainerRuntime3.getEntryPoint();
 		assert(summarizer !== undefined, "summarizer should exist");
 		const { summaryTree, summaryRefSeq, summaryVersion } = await summarizeNow(
 			summarizer as ISummarizer,
@@ -657,37 +670,43 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		// Incremental summary check
 		const datastoresTree = summaryTree.tree[".channels"];
 		assert(datastoresTree.type === SummaryType.Tree, "sdo3 should be summarized!");
-		const do3Tree = datastoresTree.tree[do3.id];
-		assert(do3Tree.type === SummaryType.Tree, "Expected tree!");
+		const rootDataObjectTree = datastoresTree.tree[dataObject3.id];
+		assert(rootDataObjectTree.type === SummaryType.Tree, "Expected tree!");
 		assert(
 			datastoresTree.tree[unchangedId].type === SummaryType.Handle,
 			"Expected summary handle!",
 		);
 		// second sequence number check
 		assert.equal(
-			lastKnownNumber,
+			preMigrationSequenceNumber,
 			summaryRefSeq,
 			"lastKnownNumber before migration should match the summary sequence number!",
 		);
 		migrationContext.migrationOn = false;
 
 		// validation that we can load the container in the v2 state
-		const c4 = await provider.loadContainer(runtimeFactoryV2, undefined, {
+		const container4 = await provider.loadContainer(runtimeFactoryV2, undefined, {
 			headers: { [LoaderHeader.version]: summaryVersion },
 		});
-		const do4 = await requestFluidObject<RootDOV2>(c4, "/");
-		for (const data of do4.data) {
+		// The root data object should be v2 now
+		const rootDataObject4 = await requestFluidObject<RootDOV2>(container4, "/");
+		for (const data of rootDataObject4.data) {
 			assert(data === "abc", "should be properly set");
 		}
-		assert(do4.rootDDS.get("some") === "op", "first op lost!");
-		assert(do4.rootDDS.get("another") === "op", "second op lost!");
-		assert(do4.data.length === scripts, `Should have ${scripts} not ${do4.data.length}`);
+		assert(rootDataObject4.rootDDS.get("some") === "op", "first op lost!");
+		assert(rootDataObject4.rootDDS.get("another") === "op", "second op lost!");
+		assert(
+			rootDataObject4.data.length === scripts,
+			`Should have ${scripts} not ${rootDataObject4.data.length}`,
+		);
 
 		// v2 can send ops
-		do4.rootDDS.set("any", "op");
-		do4.modifyData("xyz");
+		rootDataObject4.rootDDS.set("any", "op");
+		rootDataObject4.modifyData("xyz");
 		await provider.ensureSynchronized();
-		for (const data of do4.data) {
+		// Something cool to note, the summarizer client isn't closed, but it's able to process the data
+		// We still want to reload the summarizer client for search purposes.
+		for (const data of rootDataObject4.data) {
 			assert(data === "xyz", "should be properly set");
 		}
 	});
