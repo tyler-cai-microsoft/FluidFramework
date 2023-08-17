@@ -679,6 +679,8 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		for (const data of do4.data) {
 			assert(data === "abc", "should be properly set");
 		}
+		assert(do4.rootDDS.get("some") === "op", "first op lost!");
+		assert(do4.rootDDS.get("another") === "op", "second op lost!");
 		assert(do4.data.length === scripts, `Should have ${scripts} not ${do4.data.length}`);
 
 		// v2 can send ops
