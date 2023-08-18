@@ -244,7 +244,7 @@ class DataStructureAnalyzer implements IMessageAnalyzer {
 	private readonly dataType = new Map<string, string>();
 	private readonly dataTypeStats = new Map<string, [number, number]>();
 	private readonly objectStats = new Map<string, [number, number]>();
-	// eslint-disable-next-line @typescript-eslint/member-delimiter-style
+
 	private readonly chunkMap = new Map<string, { chunks: string[]; totalSize: number }>();
 
 	public processOp(
@@ -583,11 +583,12 @@ function processOp(
 				} else {
 					return;
 				}
-				// eslint-disable-next-line no-fallthrough
 			}
 			case ContainerMessageType.IdAllocation:
 			case ContainerMessageType.FluidDataStoreOp:
 			case ContainerMessageType.Alias:
+			case ContainerMessageType.Accept:
+			case ContainerMessageType.Propose:
 			case ContainerMessageType.Rejoin: {
 				let envelope = runtimeMessage.contents as IEnvelope;
 				// TODO: Legacy?

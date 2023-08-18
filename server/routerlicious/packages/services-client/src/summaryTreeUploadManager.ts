@@ -62,6 +62,9 @@ export class SummaryTreeUploadManager implements ISummaryUploadManager {
 			}),
 		);
 
+		console.log("server");
+		console.log(entries);
+
 		const treeHandle = await this.manager.createGitTree({ tree: entries });
 		return treeHandle.sha;
 	}

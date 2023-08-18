@@ -12,7 +12,7 @@ import {
 	ISummaryTree,
 	IDocumentMessage,
 } from "@fluidframework/protocol-definitions";
-import { ISummaryStats } from "@fluidframework/runtime-definitions";
+import { ISummaryStats, ISummaryTreeWithStats } from "@fluidframework/runtime-definitions";
 import { ISummaryConfigurationHeuristics } from "../containerRuntime";
 import { ISummaryAckMessage, ISummaryNackMessage, ISummaryOpMessage } from "./summaryCollection";
 import { SummarizeReason } from "./summaryGenerator";
@@ -115,6 +115,7 @@ export interface ISubmitSummaryOptions extends ISummarizeOptions {
 	readonly summaryLogger: ITelemetryLoggerExt;
 	/** Tells when summary process should be cancelled */
 	readonly cancellationToken: ISummaryCancellationToken;
+	readonly summarizeResult?: ISummaryTreeWithStats;
 }
 
 export interface IOnDemandSummarizeOptions extends ISummarizeOptions {

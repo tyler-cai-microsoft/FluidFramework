@@ -98,6 +98,7 @@ export class LocalDocumentStorageService implements IDocumentStorageService {
 			const version = await this.getVersions(this.id, 1);
 			return version[0].id;
 		}
+
 		return this.summaryTreeUploadManager.writeSummaryTree(
 			summary,
 			context.ackHandle ?? "",

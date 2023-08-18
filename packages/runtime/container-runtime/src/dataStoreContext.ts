@@ -560,7 +560,7 @@ export abstract class FluidDataStoreContext
 		const pathPartsForChildren = [channelsTreeName];
 
 		// Add data store's attributes to the summary.
-		const { pkg } = await this.getInitialSnapshotDetails();
+		const pkg = this.pkg ?? (await this.getInitialSnapshotDetails()).pkg;
 		const isRoot = await this.isRoot();
 		const attributes = createAttributes(pkg, isRoot);
 		addBlobToSummary(summarizeResult, dataStoreAttributesBlobName, JSON.stringify(attributes));
