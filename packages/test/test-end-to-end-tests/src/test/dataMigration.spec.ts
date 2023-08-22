@@ -5,19 +5,7 @@
 
 import { strict as assert } from "assert";
 import { describeNoCompat } from "@fluid-internal/test-version-utils";
-import {
-	AttachState,
-	IAudience,
-	IBatchMessage,
-	IContainer,
-	IContainerContext,
-	IDeltaManager,
-	IErrorBase,
-	IFluidCodeDetails,
-	ILoader,
-	ILoaderOptions,
-	LoaderHeader,
-} from "@fluidframework/container-definitions";
+import { IContainer, IContainerContext, LoaderHeader } from "@fluidframework/container-definitions";
 import {
 	ITestObjectProvider,
 	summarizeNow,
@@ -36,34 +24,25 @@ import {
 	DefaultSummaryConfiguration,
 	IContainerRuntimeOptions,
 	ISummarizer,
-	summarizerClientType,
 } from "@fluidframework/container-runtime";
-import { RuntimeFactoryHelper, requestFluidObject } from "@fluidframework/runtime-utils";
-import { IDocumentStorageService } from "@fluidframework/driver-definitions";
-import { FluidObject, IFluidHandle, ITelemetryBaseLogger } from "@fluidframework/core-interfaces";
+import { requestFluidObject } from "@fluidframework/runtime-utils";
+import { FluidObject, IFluidHandle } from "@fluidframework/core-interfaces";
 import { Deferred } from "@fluidframework/common-utils";
-import { IChannelFactory, IFluidDataStoreRuntime } from "@fluidframework/datastore-definitions";
+import { IFluidDataStoreRuntime } from "@fluidframework/datastore-definitions";
 import {
-	IClientDetails,
-	IDocumentMessage,
-	IQuorumClients,
 	ISequencedDocumentMessage,
-	ISnapshotTree,
 	ISummaryAck,
-	ISummaryContent,
-	IVersion,
 	MessageType,
 	SummaryType,
 } from "@fluidframework/protocol-definitions";
 import { SharedString } from "@fluidframework/sequence";
-import {
-	FluidDataStoreRegistryEntry,
-	IFluidDataStoreRegistry,
-	NamedFluidDataStoreRegistryEntries,
-	NamedFluidDataStoreRegistryEntry,
-} from "@fluidframework/runtime-definitions";
+import { NamedFluidDataStoreRegistryEntries } from "@fluidframework/runtime-definitions";
 import { IContainerRuntime } from "@fluidframework/container-runtime-definitions";
 import { RuntimeRequestHandler } from "@fluidframework/request-handler";
+import {
+	MigratorDataObject,
+	ContainerRuntimeFactoryManager,
+} from "@fluid-experimental/data-migration";
 
 /**
  * At the top level we are using the ContainerRuntimeFactoryManager which utilizes both the regular containerRuntimeFactory
@@ -125,324 +104,51 @@ const summaryRuntimeOptions: IContainerRuntimeOptions = {
 	},
 };
 
-// Not sure what the right implementation here is
-// Essentially the goal is to pretend to be the service when processing ops.
-class MigrationQueue {
-	private readonly actions: (() => void)[] = [];
-	public push(action: () => void) {
-		this.actions.push(action);
-	}
-
-	public process() {
-		for (const action of this.actions) {
-			action();
-		}
-	}
-}
-
-// This is the container context that has two modes - migration mode and regular mode.
-class MigrationContainerContext implements IContainerContext {
-	public migrationOn: boolean = false;
-	public queue: MigrationQueue = new MigrationQueue();
-	constructor(private readonly context: IContainerContext) {
-		this.sequenceNumber = context.deltaManager.lastSequenceNumber;
-		this.minimumSequenceNumber = context.deltaManager.lastSequenceNumber;
-		this.clientSequenceNumber = context.deltaManager.lastSequenceNumber;
-		this.referenceSequenceNumber = context.deltaManager.lastSequenceNumber;
-	}
-
-	// Honestly, not sure which number should be what, so I made them all the same.
-	private readonly sequenceNumber: number;
-	private readonly minimumSequenceNumber: number;
-	private readonly clientSequenceNumber: number;
-	private readonly referenceSequenceNumber: number;
-	private _runtime?: ContainerRuntime;
-	private get runtime(): ContainerRuntime {
-		assert(this._runtime !== undefined, "runtime needs to be set before retrieving this");
-		return this._runtime;
-	}
-
-	// The runtime needs to be passed the context first, so once it's created, we pass back the runtime.
-	public setRuntime(runtime: ContainerRuntime) {
-		this._runtime = runtime;
-	}
-
-	// Added this queue so that the local message would be processed properly
-	public process() {
-		this.queue.process();
-	}
-
-	// I don't think we use this, but I overwrote it just in case
-	submitFn: (type: MessageType, contents: any, batch: boolean, appData?: any) => number = (
-		type,
-		contents,
-		batch,
-		appData,
-	) => {
-		if (!this.migrationOn) {
-			return this.context.submitFn(type, contents, batch, appData);
-		}
-
-		this.queue.push(() => {
-			const message: ISequencedDocumentMessage = {
-				clientId: this.runtime.clientId ?? "",
-				sequenceNumber: this.sequenceNumber,
-				term: undefined,
-				minimumSequenceNumber: this.minimumSequenceNumber,
-				clientSequenceNumber: this.clientSequenceNumber,
-				referenceSequenceNumber: this.referenceSequenceNumber,
-				type,
-				contents,
-				timestamp: 0, // Seems like something important to discuss especially in terms of GC
-			};
-			this.runtime.process(message, true);
-		});
-
-		return this.clientSequenceNumber;
-	};
-
-	// This method should be looked at.
-	submitBatchFn: (
-		batch: IBatchMessage[],
-		referenceSequenceNumber?: number | undefined,
-	) => number = (batch, referenceSequenceNumber) => {
-		if (!this.migrationOn) {
-			return this.context.submitBatchFn(batch, referenceSequenceNumber);
-		}
-		this.queue.push(() => {
-			for (const batchMessage of batch) {
-				const message: ISequencedDocumentMessage = {
-					clientId: this.runtime.clientId ?? "",
-					sequenceNumber: this.sequenceNumber,
-					term: undefined,
-					minimumSequenceNumber: this.minimumSequenceNumber,
-					clientSequenceNumber: this.clientSequenceNumber,
-					referenceSequenceNumber: this.referenceSequenceNumber,
-					type: MessageType.Operation,
-					contents: batchMessage.contents,
-					timestamp: 0, // Seems like something important to discuss especially in terms of GC
-				};
-				this.runtime.process(message, true);
-			}
-		});
-		return this.clientSequenceNumber;
-	};
-
-	// All these should be whatever the context originally returns
-	options: ILoaderOptions = this.context.options;
-	readonly id: string = this.context.id;
-	get clientId(): string | undefined {
-		return this.context.clientId;
-	}
-	clientDetails: IClientDetails = this.context.clientDetails;
-	storage: IDocumentStorageService = this.context.storage;
-	connected: boolean = this.context.connected;
-	baseSnapshot: ISnapshotTree | undefined = this.context.baseSnapshot;
-	submitSummaryFn: (
-		summaryOp: ISummaryContent,
-		referenceSequenceNumber?: number | undefined,
-	) => number = this.context.submitSummaryFn;
-	submitSignalFn: (contents: any) => void = (_) => {};
-	disposeFn?: ((error?: IErrorBase | undefined) => void) | undefined = this.context.disposeFn;
-	closeFn: (error?: IErrorBase | undefined) => void = this.context.closeFn;
-	deltaManager: IDeltaManager<ISequencedDocumentMessage, IDocumentMessage> =
-		this.context.deltaManager;
-	quorum: IQuorumClients = this.context.quorum;
-	getSpecifiedCodeDetails?: () => IFluidCodeDetails | undefined =
-		this.context.getSpecifiedCodeDetails;
-	audience: IAudience | undefined = this.context.audience;
-	loader: ILoader = this.context.loader;
-	taggedLogger: ITelemetryBaseLogger = this.context.taggedLogger;
-	pendingLocalState?: unknown = this.context.pendingLocalState;
-	scope: FluidObject = this.context.scope;
-	getAbsoluteUrl?: (relativeUrl: string) => Promise<string | undefined> =
-		this.context.getAbsoluteUrl;
-	attachState: AttachState = this.context.attachState;
-	getLoadedFromVersion: () => IVersion | undefined = this.context.getLoadedFromVersion;
-	updateDirtyContainerState: (dirty: boolean) => void = this.context.updateDirtyContainerState;
-	supportedFeatures?: ReadonlyMap<string, unknown> | undefined = this.context.supportedFeatures;
-}
-
-// Put all shared object factories in here? Not exactly sure. What if a customer wants a custom DDS? Allow them to input a factory.
-// Haven't thought too deeply about how to expose this.
-const dynamicRegistry: IChannelFactory[] = [
-	SharedDirectory.getFactory(),
-	SharedString.getFactory(),
-];
-
-// Replaces a regular registry with a Migration registry
-class MigrationDataObjectFactoryRegistry implements IFluidDataStoreRegistry {
-	public get IFluidDataStoreRegistry() {
-		return this;
-	}
-
-	constructor(private readonly registry: IFluidDataStoreRegistry) {}
-
-	public async get(name: string): Promise<FluidDataStoreRegistryEntry | undefined> {
-		const entry = await this.registry.get(name);
-		if (entry === undefined) {
-			return entry;
-		}
-
-		return getMigrationDataStoreRegistryEntry(entry);
-	}
-}
-
+// customers determine how they will build their registry
 // I don't think I need to do this, but this works.
-class MigrationDataObjectFactory extends DataObjectFactory<MigrationDataObject> {
+class MigratorDataObjectFactory extends DataObjectFactory<MigratorDataObject> {
 	public get IFluidDataStoreFactory() {
 		return this;
 	}
 
 	constructor(public readonly type: string) {
-		super(type, MigrationDataObject, dynamicRegistry, []);
+		super(
+			type,
+			MigratorDataObject,
+			[SharedDirectory.getFactory(), SharedString.getFactory()],
+			[],
+		);
 	}
-}
-
-// Copied from dataStoreContext.ts
-interface ISnapshotDetails {
-	pkg: readonly string[];
-	isRootDataStore: boolean;
-	snapshot?: ISnapshotTree;
-}
-
-// Not sure how/if we should change the FluidDataStoreContext
-interface IModifiableFluidDataStoreContext {
-	pkg?: readonly string[];
-	getInitialSnapshotDetails(): Promise<ISnapshotDetails>;
-}
-
-// There's a vein of thought to put the migration code here, where it extends the MigrationDataObject.
-// Another thought is to party on the whole document. We'll need both solutions, so this is one way of doing it.
-class MigrationDataObject extends DataObject {
-	public get _root() {
-		return this.root;
-	}
-
-	// Not sure if this is the right place for it, but might work
-	public changeType(pkg: readonly string[]) {
-		const context = this.context as unknown as IModifiableFluidDataStoreContext;
-		context.pkg = pkg;
-	}
-
-	// Further improvements: Add delete/replace dds functionality
 }
 
 // Copied from containerRuntimeFactoryWithDefaultDataStore.ts
 const defaultDataStoreId = "default";
 class MigrationContainerRuntimeFactory extends BaseContainerRuntimeFactory {
-	/**
-	 * Constructor
-	 * @param defaultFactory -
-	 * @param registryEntries -
-	 * @param dependencyContainer - deprecated, will be removed in a future release
-	 * @param requestHandlers -
-	 * @param runtimeOptions -
-	 * @param initializeEntryPoint -
-	 */
 	constructor(
 		registryEntries: NamedFluidDataStoreRegistryEntries,
 		runtimeOptions?: IContainerRuntimeOptions,
 		requestHandlers: RuntimeRequestHandler[] = [],
 		initializeEntryPoint?: (runtime: IContainerRuntime) => Promise<FluidObject>,
 	) {
-		const newRegistryEntries: NamedFluidDataStoreRegistryEntry[] = [];
-		for (const entry of registryEntries) {
-			newRegistryEntries.push([entry[0], getMigrationRegistryEntryAsync(entry[1])]);
-		}
-
 		super(
-			newRegistryEntries,
+			registryEntries,
 			undefined, // dependency container, skipping this
 			[defaultRouteRequestHandler(defaultDataStoreId), ...requestHandlers],
 			runtimeOptions,
 			initializeEntryPoint,
 		);
 	}
-}
 
-function getMigrationDataStoreRegistryEntry(
-	entry: FluidDataStoreRegistryEntry,
-): FluidDataStoreRegistryEntry {
-	const registry = entry.IFluidDataStoreRegistry;
-	const factory = entry.IFluidDataStoreFactory;
-	return {
-		IFluidDataStoreRegistry:
-			registry === undefined ? undefined : new MigrationDataObjectFactoryRegistry(registry),
-		IFluidDataStoreFactory:
-			factory === undefined ? undefined : new MigrationDataObjectFactory(factory.type),
-	};
-}
-
-async function getMigrationRegistryEntryAsync(entry: Promise<FluidDataStoreRegistryEntry>) {
-	return getMigrationDataStoreRegistryEntry(await entry);
-}
-
-// This api needs to be adjusted. Not sure exactly what the right one looks like.
-class ContainerRuntimeFactoryManager extends RuntimeFactoryHelper {
-	private clientDetailsType?: string;
-	private readonly waitForSummarizerCreation = new Deferred<ContainerRuntime>();
-	private readonly waitForMigrationContext = new Deferred<MigrationContainerContext>();
-	public get summarizerRuntime() {
-		return this.waitForSummarizerCreation.promise;
-	}
-
-	public get migrationContext() {
-		return this.waitForMigrationContext.promise;
-	}
-	private _interactiveRuntime?: ContainerRuntime;
-	public get interactiveRuntime() {
-		assert(this._interactiveRuntime !== undefined);
-		return this._interactiveRuntime;
-	}
-	private readonly migrationContainerRuntimeFactory: MigrationContainerRuntimeFactory;
-	private runtimeFactory: BaseContainerRuntimeFactory;
-
-	constructor(
-		private readonly runtimeFactoryV2: ContainerRuntimeFactoryWithDefaultDataStore,
-		registryEntries: NamedFluidDataStoreRegistryEntries,
-		runtimeOptions: IContainerRuntimeOptions,
-	) {
-		super();
-		this.migrationContainerRuntimeFactory = new MigrationContainerRuntimeFactory(
-			registryEntries,
-			runtimeOptions,
-		);
-		this.runtimeFactory = runtimeFactoryV2;
-	}
-	public async preInitialize(
+	public async instantiateRuntime(
 		context: IContainerContext,
 		existing: boolean,
 	): Promise<ContainerRuntime> {
-		this.clientDetailsType = context.clientDetails.type;
-		if (this.clientDetailsType === summarizerClientType) {
-			const migrationContext = new MigrationContainerContext(context);
-			this.runtimeFactory = this.migrationContainerRuntimeFactory;
-			const runtime = await this.runtimeFactory.preInitialize(migrationContext, existing);
-			migrationContext.setRuntime(runtime);
-			this.waitForMigrationContext.resolve(migrationContext);
-			return runtime;
-		}
-
-		return this.runtimeFactory.preInitialize(context, existing);
-	}
-
-	public async instantiateFirstTime(runtime: ContainerRuntime): Promise<void> {
-		return this.runtimeFactory.instantiateFirstTime(runtime);
-	}
-
-	public async instantiateFromExisting(runtime: ContainerRuntime): Promise<void> {
-		return this.runtimeFactory.instantiateFromExisting(runtime);
-	}
-
-	public async hasInitialized(runtime: ContainerRuntime): Promise<void> {
-		await this.runtimeFactory.hasInitialized(runtime);
-		if (this.clientDetailsType === summarizerClientType) {
-			this.waitForSummarizerCreation.resolve(runtime);
-			this.runtimeFactory = this.runtimeFactoryV2;
-		} else {
-			this._interactiveRuntime = runtime;
-		}
+		const runtime = await this.preInitialize(context, existing);
+		await (existing
+			? this.instantiateFromExisting(runtime)
+			: this.instantiateFirstTime(runtime));
+		await this.hasInitialized(runtime);
+		return runtime;
 	}
 }
 
@@ -545,13 +251,18 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 	const rootDOFactoryV2 = new DataObjectFactory(rootType2, RootDOV2, [], []);
 
 	const registryV1: NamedFluidDataStoreRegistryEntries = [
-		[rootDOFactoryV1.type, Promise.resolve(rootDOFactoryV1)],
-		[scriptDOFactory.type, Promise.resolve(scriptDOFactory)],
+		[rootType1, Promise.resolve(rootDOFactoryV1)],
+		[scriptType, Promise.resolve(scriptDOFactory)],
 	];
 	const registryV2: NamedFluidDataStoreRegistryEntries = [
-		[rootDOFactoryV1.type, Promise.resolve(rootDOFactoryV1)],
-		[rootDOFactoryV2.type, Promise.resolve(rootDOFactoryV2)],
-		[scriptDOFactory.type, Promise.resolve(scriptDOFactory)],
+		[rootType1, Promise.resolve(rootDOFactoryV1)],
+		[rootType2, Promise.resolve(rootDOFactoryV2)],
+		[scriptType, Promise.resolve(scriptDOFactory)],
+	];
+	const migrationRegistry: NamedFluidDataStoreRegistryEntries = [
+		[rootType1, Promise.resolve(new MigratorDataObjectFactory(rootType1))],
+		[rootType2, Promise.resolve(new MigratorDataObjectFactory(rootType2))],
+		[scriptType, Promise.resolve(new MigratorDataObjectFactory(scriptType))],
 	];
 
 	const runtimeFactoryV1 = new ContainerRuntimeFactoryWithDefaultDataStore(
@@ -570,11 +281,15 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		summaryRuntimeOptions,
 	);
 
+	const migrationContainerRuntimeFactory = new MigrationContainerRuntimeFactory(
+		migrationRegistry,
+		summaryRuntimeOptions,
+	);
+
 	// I am passing v2 here as it has registry info for both v1 and v2.
 	const migrationRuntimeFactory = new ContainerRuntimeFactoryManager(
 		runtimeFactoryV2,
-		registryV2,
-		summaryRuntimeOptions,
+		migrationContainerRuntimeFactory,
 	);
 
 	beforeEach(() => {
@@ -604,7 +319,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		await waitForContainerConnection(container2);
 		const rootDataObject2 = await requestFluidObject<RootDOV1>(container2, "/");
 		rootDataObject2.rootDDS.set("another", "op");
-		(migrationRuntimeFactory.interactiveRuntime as any).summaryManager.forceSummarization();
+		(rootDataObject2.containerRuntime as any).summaryManager.forceSummarization();
 		const summarizerContainerRuntime3 = await migrationRuntimeFactory.summarizerRuntime;
 
 		// Grab the id of the unchanged data object to do incremental summary verification.
@@ -630,12 +345,12 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		const rootDataObject3Handle =
 			await summarizerContainerRuntime3.getAliasedDataStoreEntryPoint("default");
 		assert(rootDataObject3Handle !== undefined, "should be able to get the old runtime handle");
-		const dataObject3 = (await rootDataObject3Handle.get()) as MigrationDataObject;
+		const dataObject3 = (await rootDataObject3Handle.get()) as MigratorDataObject;
 
 		for (let i = 0; i < scriptDOCount; i++) {
 			const key = `${i}`;
 			const scriptDO = await dataObject3._root
-				.get<IFluidHandle<MigrationDataObject>>(key)
+				.get<IFluidHandle<MigratorDataObject>>(key)
 				?.get();
 			assert(scriptDO !== undefined, "Script DO missing!");
 			const scriptSharedString = await scriptDO._root
@@ -644,7 +359,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 			assert(scriptSharedString !== undefined, "Script shared string missing!");
 			dataObject3._root.set(key, scriptSharedString.getText());
 		}
-		dataObject3.changeType([rootDOFactoryV2.type]);
+		dataObject3.changeType([rootType2]);
 
 		// End of conversion code
 		// Learning note: calling addedGCOutboundReference might be useful in cases we want to do create new DOs and reference them.

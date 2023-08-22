@@ -705,6 +705,9 @@ export class Summarizer extends EventEmitter implements ISummarizer {
 }
 
 // @public (undocumented)
+export const summarizerClientType = "summarizer";
+
+// @public (undocumented)
 export type SummarizeResultPart<TSuccess, TFailure = undefined> = {
     success: true;
     data: TSuccess;
