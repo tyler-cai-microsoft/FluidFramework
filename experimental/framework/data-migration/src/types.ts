@@ -3,6 +3,8 @@
  * Licensed under the MIT License.
  */
 
+import { IRuntimeFactory } from "@fluidframework/container-definitions";
+
 // Not sure how/if we should change the FluidDataStoreContext
 // Note pkg is protected under FluidDataStoreContext.
 export interface IModifiableFluidDataStoreContext {
@@ -12,4 +14,8 @@ export interface IModifiableFluidDataStoreContext {
 export interface IMigrationQueue {
 	push(action: () => void): void;
 	process(): void;
+}
+
+export interface IMigratorDetectorRuntimeFactory extends IRuntimeFactory {
+	readonly shouldMigrate: boolean;
 }

@@ -88,7 +88,9 @@ export enum ContainerMessageType {
     FluidDataStoreOp = "component",
     IdAllocation = "idAllocation",
     // (undocumented)
-    Rejoin = "rejoin"
+    Rejoin = "rejoin",
+    // (undocumented)
+    StartMigration = "startMigration"
 }
 
 // @public
@@ -139,6 +141,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     // (undocumented)
     enqueueSummarize(options: IEnqueueSummarizeOptions): EnqueueSummarizeResult;
     ensureNoDataModelChanges<T>(callback: () => T): T;
+    flush(): void;
     // (undocumented)
     get flushMode(): FlushMode;
     readonly gcTombstoneEnforcementAllowed: boolean;
@@ -217,6 +220,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     submitDataStoreOp(id: string, contents: any, localOpMetadata?: unknown): void;
     // (undocumented)
     submitDataStoreSignal(address: string, type: string, content: any): void;
+    // (undocumented)
+    submitMigrateOp(): void;
     submitSignal(type: string, content: any): void;
     submitSummary(options: ISubmitSummaryOptions): Promise<SubmitSummaryResult>;
     summarize(options: {

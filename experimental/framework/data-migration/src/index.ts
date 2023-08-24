@@ -5,3 +5,4 @@
 
 export { ContainerRuntimeFactoryManager } from "./containerRuntimeFactoryManager";
 export { MigratorDataObject } from "./migratorDataObject";
+export { IMigratorDetectorRuntimeFactory } from "./types";

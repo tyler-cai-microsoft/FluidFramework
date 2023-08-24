@@ -11,6 +11,7 @@ import {
 } from "@fluidframework/container-definitions";
 import { ContainerRuntime, summarizerClientType } from "@fluidframework/container-runtime";
 import { MigrationContainerContext } from "./migratorContainerContext";
+import { IMigratorDetectorRuntimeFactory } from "./types";
 
 interface IContainerRuntimeFactory extends IRuntimeFactory {
 	instantiateRuntime(context: IContainerContext, existing: boolean): Promise<ContainerRuntime>;
@@ -18,7 +19,6 @@ interface IContainerRuntimeFactory extends IRuntimeFactory {
 
 // This api needs to be adjusted. Not sure exactly what the right one looks like.
 export class ContainerRuntimeFactoryManager implements IRuntimeFactory {
-	private clientDetailsType?: string;
 	private readonly waitForSummarizerCreation = new Deferred<ContainerRuntime>();
 	private readonly waitForMigrationContext = new Deferred<MigrationContainerContext>();
 	public get summarizerRuntime() {
@@ -33,15 +33,18 @@ export class ContainerRuntimeFactoryManager implements IRuntimeFactory {
 	}
 
 	constructor(
-		private readonly runtimeFactory: IRuntimeFactory,
+		private readonly runtimeFactory: IMigratorDetectorRuntimeFactory,
 		private readonly migrationRuntimeFactory: IContainerRuntimeFactory,
 	) {}
+
 	public async instantiateRuntime(
 		context: IContainerContext,
 		existing: boolean,
 	): Promise<IRuntime> {
-		this.clientDetailsType = context.clientDetails.type;
-		if (this.clientDetailsType === summarizerClientType) {
+		if (
+			context.clientDetails.type === summarizerClientType &&
+			this.runtimeFactory.shouldMigrate
+		) {
 			const migrationContext = new MigrationContainerContext(context);
 			const runtime = await this.migrationRuntimeFactory.instantiateRuntime(
 				migrationContext,
@@ -52,7 +55,6 @@ export class ContainerRuntimeFactoryManager implements IRuntimeFactory {
 			this.waitForSummarizerCreation.resolve(runtime);
 			return runtime;
 		}
-
 		return this.runtimeFactory.instantiateRuntime(context, existing);
 	}
 }

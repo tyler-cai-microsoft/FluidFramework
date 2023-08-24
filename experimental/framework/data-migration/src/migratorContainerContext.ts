@@ -8,7 +8,7 @@ import {
 	IVersion,
 	MessageType,
 } from "@fluidframework/protocol-definitions";
-import { assert } from "@fluidframework/common-utils";
+import { Deferred, assert } from "@fluidframework/common-utils";
 import {
 	IBatchMessage,
 	IContainerContext,
@@ -16,42 +16,105 @@ import {
 	IFluidCodeDetails,
 } from "@fluidframework/container-definitions";
 import { IDocumentStorageService } from "@fluidframework/driver-definitions";
-import { ContainerRuntime } from "@fluidframework/container-runtime";
+import { ContainerMessageType, ContainerRuntime } from "@fluidframework/container-runtime";
 import { ITelemetryBaseLogger, FluidObject } from "@fluidframework/core-interfaces";
 import { IMigrationQueue } from "./types";
 import { MigrationQueue } from "./migratorQueue";
 
 export class MigrationContainerContext implements IContainerContext {
-	public migrationOn: boolean = false;
 	public queue: IMigrationQueue = new MigrationQueue();
+
 	constructor(private readonly context: IContainerContext) {
-		this.sequenceNumber = context.deltaManager.lastSequenceNumber;
-		this.minimumSequenceNumber = context.deltaManager.lastSequenceNumber;
-		this.clientSequenceNumber = context.deltaManager.lastSequenceNumber;
-		this.referenceSequenceNumber = context.deltaManager.lastSequenceNumber;
 		this.getSpecifiedCodeDetails = context.getSpecifiedCodeDetails?.bind(context) ?? undefined;
 		this.getAbsoluteUrl = context.getAbsoluteUrl?.bind(context) ?? undefined;
 	}
 
 	// Honestly, not sure which number should be what, so I made them all the same.
-	private readonly sequenceNumber: number;
-	private readonly minimumSequenceNumber: number;
-	private readonly clientSequenceNumber: number;
-	private readonly referenceSequenceNumber: number;
+	private _sequenceNumber?: number;
+	private get sequenceNumber() {
+		assert(
+			this._sequenceNumber !== undefined,
+			"_sequenceNumber should have been set before retrieval",
+		);
+		return this._sequenceNumber;
+	}
+	private _minimumSequenceNumber?: number;
+	private get minimumSequenceNumber() {
+		assert(
+			this._minimumSequenceNumber !== undefined,
+			"_minimumSequenceNumber should have been set before retrieval",
+		);
+		return this._minimumSequenceNumber;
+	}
+	private _clientSequenceNumber?: number;
+	private get clientSequenceNumber() {
+		assert(
+			this._clientSequenceNumber !== undefined,
+			"_clientSequenceNumber should have been set before retrieval",
+		);
+		return this._clientSequenceNumber;
+	}
+	private _referenceSequenceNumber?: number;
+	private get referenceSequenceNumber() {
+		assert(
+			this._referenceSequenceNumber !== undefined,
+			"_referenceSequenceNumber should have been set before retrieval",
+		);
+		return this._referenceSequenceNumber;
+	}
 	private _runtime?: ContainerRuntime;
 	private get runtime(): ContainerRuntime {
 		assert(this._runtime !== undefined, "runtime needs to be set before retrieving this");
 		return this._runtime;
 	}
+	private migrationOn: boolean = false;
+	private minimumSequenceNumberForPause?: number;
+	private readonly waitForPause: Deferred<void> = new Deferred();
+
+	public async startMigration() {
+		this.runtime.submitMigrateOp();
+		await this.waitForPause.promise;
+		this._sequenceNumber = this.context.deltaManager.lastSequenceNumber;
+		this._minimumSequenceNumber = this.context.deltaManager.lastSequenceNumber;
+		this._clientSequenceNumber = this.context.deltaManager.lastSequenceNumber;
+		this._referenceSequenceNumber = this.context.deltaManager.lastSequenceNumber;
+		this.migrationOn = true;
+	}
 
 	// The runtime needs to be passed the context first, so once it's created, we pass back the runtime.
 	public setRuntime(runtime: ContainerRuntime) {
 		this._runtime = runtime;
+		runtime.on("op", (op) => {
+			if (op.type === ContainerMessageType.StartMigration) {
+				this.minimumSequenceNumberForPause = op.sequenceNumber;
+			}
+			if (
+				this.minimumSequenceNumberForPause !== undefined &&
+				this.context.deltaManager.minimumSequenceNumber <=
+					this.minimumSequenceNumberForPause
+			) {
+				this.waitForPause.resolve();
+				runtime.off("op", () => {});
+			}
+		});
 	}
 
 	// Added this queue so that the local message would be processed properly
-	public process() {
+	public async submitMigrationSummary() {
+		this.runtime.flush();
 		this.queue.process();
+		assert(
+			this.deltaManager.lastKnownSeqNumber === this.sequenceNumber,
+			"Delta manager should not have processed any ops!",
+		);
+		const summarizeResult = this.runtime.summarizeOnDemand({ reason: "migration" });
+		const ackOrNackResult = await summarizeResult.receivedSummaryAckOrNack;
+		if (!ackOrNackResult.success) {
+			throw new Error("failed to summarize result!");
+		}
+		this.runtime.closeFn();
+		this.runtime.disposeFn();
+		return summarizeResult;
 	}
 
 	// I don't think we use this, but I overwrote it just in case
