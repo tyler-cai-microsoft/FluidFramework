@@ -454,7 +454,7 @@ describeNoCompat("Data Migration combine stuff into one DDS", (getTestObjectProv
 		);
 	});
 
-	it.only("Can migrate with ContainerRuntimeFactory with just summarizer", async () => {
+	it("Can migrate with ContainerRuntimeFactory with just summarizer", async () => {
 		await createContainerV1();
 
 		// Load v1.5 migration code
