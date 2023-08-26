@@ -218,10 +218,6 @@ export class SummaryManager implements IDisposable {
 		}
 	};
 
-	public forceSummarization() {
-		this.startSummarization();
-	}
-
 	private startSummarization() {
 		assert(this.state === SummaryManagerState.Off, 0x261 /* "Expected: off" */);
 		this.state = SummaryManagerState.Starting;

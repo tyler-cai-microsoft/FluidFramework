@@ -2277,7 +2277,7 @@ export class ContainerRuntime
 			case ContainerMessageType.Rejoin:
 				break;
 			case ContainerMessageType.StartMigration:
-				if (!local && !this.isSummarizerClient) {
+				if (!this.isSummarizerClient) {
 					this.migrating = true;
 				}
 				break;
@@ -3556,10 +3556,9 @@ export class ContainerRuntime
 				this.blobManager.reSubmit(opMetadata);
 				break;
 			case ContainerMessageType.Rejoin:
+			case ContainerMessageType.StartMigration:
 				this.submit(message);
 				break;
-			case ContainerMessageType.StartMigration:
-				throw new Error(`Not expecting to resubmit a migration attempt`);
 			default: {
 				// This case should be very rare - it would imply an op was stashed from a
 				// future version of runtime code and now is being applied on an older version

@@ -70,9 +70,16 @@ export class MigrationContainerContext implements IContainerContext {
 	private migrationOn: boolean = false;
 	private minimumSequenceNumberForPause?: number;
 	private readonly waitForPause: Deferred<void> = new Deferred();
+	public get waitForProposalAcceptance(): Promise<void> {
+		return this.waitForPause.promise;
+	}
 
+	// Who should emit the proposal? the interactive clients?
+	// what do we do when there already exists a summarizer?
+	// if we tell v1 summarizers to close, is that useful?
+	// we will need to load a v1Tov2 summarizer. The code may not sit on the v1 main client
+	// thus we will need to close it? not sure. Maybe close all v1 main clients in order?
 	public async startMigration() {
-		this.runtime.submitMigrateOp();
 		await this.waitForPause.promise;
 		this._sequenceNumber = this.context.deltaManager.lastSequenceNumber;
 		this._minimumSequenceNumber = this.context.deltaManager.lastSequenceNumber;
@@ -87,6 +94,9 @@ export class MigrationContainerContext implements IContainerContext {
 		runtime.on("op", (op) => {
 			if (op.type === ContainerMessageType.StartMigration) {
 				this.minimumSequenceNumberForPause = op.sequenceNumber;
+				this.startMigration().catch((error) => {
+					throw error;
+				});
 			}
 			if (
 				this.minimumSequenceNumberForPause !== undefined &&
