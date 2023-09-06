@@ -2,7 +2,8 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-import { Deferred, bufferToString, assert } from "@fluidframework/common-utils";
+import { assert, Deferred } from "@fluidframework/core-utils";
+import { bufferToString } from "@fluid-internal/client-utils";
 import { LoggingError, createChildLogger } from "@fluidframework/telemetry-utils";
 import { ISequencedDocumentMessage, MessageType } from "@fluidframework/protocol-definitions";
 import {
@@ -13,6 +14,7 @@ import {
 import {
 	Client,
 	createAnnotateRangeOp,
+	// eslint-disable-next-line import/no-deprecated
 	createGroupOp,
 	createInsertOp,
 	createRemoveRangeOp,
@@ -46,7 +48,7 @@ import {
 	ISharedObjectEvents,
 	SummarySerializer,
 } from "@fluidframework/shared-object-base";
-import { IEventThisPlaceHolder } from "@fluidframework/common-definitions";
+import { IEventThisPlaceHolder } from "@fluidframework/core-interfaces";
 import { ISummaryTreeWithStats, ITelemetryContext } from "@fluidframework/runtime-definitions";
 import { DefaultMap, IMapOperation } from "./defaultMap";
 import { IMapMessageLocalMetadata, IValueChanged } from "./defaultMapInterfaces";
@@ -752,6 +754,7 @@ export abstract class SharedSegmentSequence<T extends ISegment>
 				stashMessage = {
 					...message,
 					referenceSequenceNumber: stashMessage.sequenceNumber - 1,
+					// eslint-disable-next-line import/no-deprecated
 					contents: ops.length !== 1 ? createGroupOp(...ops) : ops[0],
 				};
 			}
