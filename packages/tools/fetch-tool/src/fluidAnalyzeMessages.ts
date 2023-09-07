@@ -244,7 +244,7 @@ class DataStructureAnalyzer implements IMessageAnalyzer {
 	private readonly dataType = new Map<string, string>();
 	private readonly dataTypeStats = new Map<string, [number, number]>();
 	private readonly objectStats = new Map<string, [number, number]>();
-	// eslint-disable-next-line @typescript-eslint/member-delimiter-style
+
 	private readonly chunkMap = new Map<string, { chunks: string[]; totalSize: number }>();
 
 	public processOp(
@@ -548,6 +548,7 @@ function processOp(
 				break;
 			}
 			// skip for now because these ops do not have contents
+			case ContainerMessageType.StartMigration:
 			case ContainerMessageType.BlobAttach: {
 				break;
 			}
@@ -583,7 +584,6 @@ function processOp(
 				} else {
 					return;
 				}
-				// eslint-disable-next-line no-fallthrough
 			}
 			case ContainerMessageType.IdAllocation:
 			case ContainerMessageType.FluidDataStoreOp:

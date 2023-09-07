@@ -111,7 +111,17 @@
 	},
 	"typeValidation": {
 		"broken": {
+			"EnumDeclaration_ContainerMessageType": {
+				"backCompat": false
+			},
 			"ClassDeclaration_ContainerRuntime": {
+				"forwardCompat": false,
+				"backCompat": false
+			},
+			"InterfaceDeclaration_ContainerRuntimeMessage": {
+				"backCompat": false
+			},
+			"InterfaceDeclaration_IChunkedOp": {
 				"backCompat": false
 			}
 		}

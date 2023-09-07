@@ -210,6 +210,9 @@ export enum ContainerMessageType {
 	 * See the [IdCompressor README](./id-compressor/README.md) for more details.
 	 */
 	IdAllocation = "idAllocation",
+
+	// Starts migration and pauses all other container runtimes.
+	StartMigration = "startMigration",
 }
 
 /**
@@ -998,6 +1001,7 @@ export class ContainerRuntime
 	private readonly maxConsecutiveReconnects: number;
 	private readonly defaultMaxConsecutiveReconnects = 7;
 
+	private migrating: boolean = false;
 	private _orderSequentiallyCalls: number = 0;
 	private readonly _flushMode: FlushMode;
 	private flushTaskExists = false;
@@ -2044,6 +2048,8 @@ export class ContainerRuntime
 				throw new Error("chunkedOp not expected here");
 			case ContainerMessageType.Rejoin:
 				throw new Error("rejoin not expected here");
+			case ContainerMessageType.StartMigration:
+				throw new Error("startMigration not expected here");
 			default: {
 				// This should be extremely rare for stashed ops.
 				// It would require a newer runtime stashing ops and then an older one applying them,
@@ -2229,6 +2235,12 @@ export class ContainerRuntime
 		local: boolean,
 		expectRuntimeMessageType: boolean,
 	): asserts message is SequencedContainerRuntimeMessage {
+		if (this.migrating && message.type === MessageType.SummaryAck) {
+			this.migrating = false;
+			this.closeFn();
+			this.disposeFn();
+		}
+
 		// Optimistically extract ContainerRuntimeMessage-specific props from the message
 		const { type: maybeContainerMessageType, compatDetails } =
 			message as ContainerRuntimeMessage;
@@ -2255,6 +2267,11 @@ export class ContainerRuntime
 				break;
 			case ContainerMessageType.ChunkedOp:
 			case ContainerMessageType.Rejoin:
+				break;
+			case ContainerMessageType.StartMigration:
+				if (!this.isSummarizerClient) {
+					this.migrating = true;
+				}
 				break;
 			default: {
 				// If we didn't necessarily expect a runtime message type, then no worries - just return
@@ -2375,7 +2392,7 @@ export class ContainerRuntime
 	 * Flush the pending ops manually.
 	 * This method is expected to be called at the end of a batch.
 	 */
-	private flush(): void {
+	public flush(): void {
 		assert(
 			this._orderSequentiallyCalls === 0,
 			0x24c /* "Cannot call `flush()` from `orderSequentially`'s callback" */,
@@ -2507,7 +2524,7 @@ export class ContainerRuntime
 	private canSendOps() {
 		// Note that the real (non-proxy) delta manager is needed here to get the readonly info. This is because
 		// container runtime's ability to send ops depend on the actual readonly state of the delta manager.
-		return this.connected && !this.innerDeltaManager.readOnlyInfo.readonly;
+		return this.connected && !this.innerDeltaManager.readOnlyInfo.readonly && !this.migrating;
 	}
 
 	/**
@@ -3350,6 +3367,10 @@ export class ContainerRuntime
 		}
 	}
 
+	public submitMigrateOp() {
+		this.submit({ type: ContainerMessageType.StartMigration, contents: undefined });
+	}
+
 	public submitDataStoreOp(
 		id: string,
 		contents: any,
@@ -3652,6 +3673,7 @@ export class ContainerRuntime
 				this.blobManager.reSubmit(opMetadata);
 				break;
 			case ContainerMessageType.Rejoin:
+			case ContainerMessageType.StartMigration:
 				this.submit(message);
 				break;
 			default: {

@@ -71,6 +71,7 @@ export {
 	OpActionEventName,
 	ICancellableSummarizerController,
 	SubmitSummaryFailureData,
+	summarizerClientType,
 	SummaryStage,
 	IRetriableFailureResult,
 	ISummarizeEventProps,
