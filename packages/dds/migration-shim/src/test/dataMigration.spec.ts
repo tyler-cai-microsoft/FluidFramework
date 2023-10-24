@@ -34,7 +34,10 @@ import {
 	type Typed,
 	type ISharedTreeView,
 } from "@fluid-experimental/tree2";
-import { LoaderHeader } from "@fluidframework/container-definitions";
+import { AttachState, LoaderHeader } from "@fluidframework/container-definitions";
+import { type IFluidDataStoreContext } from "@fluidframework/runtime-definitions";
+import { type IFluidHandle } from "@fluidframework/core-interfaces";
+import { bufferToString, stringToBuffer } from "@fluid-internal/client-utils";
 import { MigrationShimFactory } from "../migrationShimFactory.js";
 import { type MigrationShim } from "../migrationShim.js";
 import { SharedTreeShimFactory } from "../sharedTreeShimFactory.js";
@@ -48,6 +51,10 @@ class TestDataObject extends DataObject {
 	// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 	public get _root() {
 		return this.root;
+	}
+
+	public get datastoreContext(): IFluidDataStoreContext {
+		return this.context;
 	}
 
 	// The object starts with a LegacySharedTree
@@ -71,7 +78,7 @@ class TestDataObject extends DataObject {
 				inventoryNode,
 				StablePlace.atStartOf({
 					parent: legacyTree.currentView.root,
-					label: "inventory" as TraitLabel,
+					label: legacyNodeId,
 				}),
 			),
 		);
@@ -95,10 +102,20 @@ class TestDataObject extends DataObject {
 	}
 }
 
+class TestDataObject2 extends DataObject {
+	public isAttached(): boolean {
+		return (
+			this.context.attachState === AttachState.Attached ||
+			this.context.attachState === AttachState.Attaching
+		);
+	}
+}
+
 const builder = new SchemaBuilder({ scope: "test" });
 // For now this is the schema of the view.root
 const inventorySchema = builder.object("abcInventory", {
 	quantity: builder.number,
+	handle: builder.optional(builder.handle),
 });
 
 // This is some schema to be updated later
@@ -109,6 +126,7 @@ function getNewTreeView(tree: ISharedTree): ISharedTreeView {
 	return tree.schematizeView({
 		initialTree: {
 			quantity: 0,
+			handle: undefined,
 		},
 		allowedSchemaModifications: AllowedUpdateType.None,
 		schema,
@@ -125,6 +143,13 @@ describeNoCompat("HotSwap", (getTestObjectProvider) => {
 		},
 	};
 
+	const blankDataObjectFactory = new DataObjectFactory(
+		"TestDataObject2",
+		TestDataObject2,
+		[],
+		{},
+	);
+
 	// V1 of the registry -----------------------------------------
 	// V1 of the code: Registry setup to create the old document
 	const oldChannelFactory = LegacySharedTree.getFactory();
@@ -138,7 +163,7 @@ describeNoCompat("HotSwap", (getTestObjectProvider) => {
 	// The 1st runtime factory, V1 of the code
 	const runtimeFactory1 = new ContainerRuntimeFactoryWithDefaultDataStore({
 		defaultFactory: dataObjectFactory1,
-		registryEntries: [dataObjectFactory1.registryEntry],
+		registryEntries: [dataObjectFactory1.registryEntry, blankDataObjectFactory.registryEntry],
 	});
 
 	// V2 of the registry (the migration registry) -----------------------------------------
@@ -160,6 +185,7 @@ describeNoCompat("HotSwap", (getTestObjectProvider) => {
 			newTree.schematizeView({
 				initialTree: {
 					quantity,
+					handle: undefined,
 				},
 				allowedSchemaModifications: AllowedUpdateType.None,
 				schema,
@@ -179,7 +205,7 @@ describeNoCompat("HotSwap", (getTestObjectProvider) => {
 	// The 2nd runtime factory, V2 of the code
 	const runtimeFactory2 = new ContainerRuntimeFactoryWithDefaultDataStore({
 		defaultFactory: dataObjectFactory2,
-		registryEntries: [dataObjectFactory2.registryEntry],
+		registryEntries: [dataObjectFactory2.registryEntry, blankDataObjectFactory.registryEntry],
 		runtimeOptions,
 	});
 
@@ -350,5 +376,95 @@ describeNoCompat("HotSwap", (getTestObjectProvider) => {
 			treeNode2.quantity === treeNode1.quantity,
 			"Failed to write from SharedTreeShim to MigrationShim",
 		);
+	});
+
+	it("LegacySharedTree can store handles before migration", async () => {
+		const container1 = await provider.loadContainer(runtimeFactory2);
+		const testObj1 = (await container1.getEntryPoint()) as TestDataObject;
+
+		const blobContents = "Blob contents";
+		const blobHandle1 = await testObj1.datastoreContext.uploadBlob(
+			stringToBuffer(blobContents, "utf8"),
+		);
+
+		const shim1 = testObj1.getTree<MigrationShim>();
+		const legacyTree1 = shim1.currentTree as LegacySharedTree;
+
+		const handleNodeId = "top" as TraitLabel;
+		const handleNode1: BuildNode = {
+			definition: handleNodeId,
+			traits: {
+				handle: {
+					definition: "handle",
+					payload: blobHandle1,
+				},
+			},
+		};
+		legacyTree1.applyEdit(
+			Change.insertTree(
+				handleNode1,
+				StablePlace.atStartOf({
+					parent: legacyTree1.currentView.root,
+					label: handleNodeId,
+				}),
+			),
+		);
+
+		const container2 = await provider.loadContainer(runtimeFactory2);
+		await provider.ensureSynchronized();
+		const testObj2 = (await container2.getEntryPoint()) as TestDataObject;
+		const shim2 = testObj2.getTree<MigrationShim>();
+		const legacyTree2 = shim2.currentTree as LegacySharedTree;
+
+		const rootNode2 = legacyTree2.currentView.getViewNode(legacyTree2.currentView.root);
+		const topNodeId2 = rootNode2.traits.get(handleNodeId)?.[0];
+		assert(topNodeId2 !== undefined, "failed to get top node");
+		const topNode2 = legacyTree2.currentView.getViewNode(topNodeId2);
+		const handleNodeId2 = topNode2.traits.get("handle" as TraitLabel)?.[0];
+		assert(handleNodeId2 !== undefined, "failed to get handle node");
+		const handleNode2 = legacyTree2.currentView.getViewNode(handleNodeId2);
+
+		const handle2 = handleNode2.payload as IFluidHandle<ArrayBufferLike>;
+		const buffer = await handle2.get();
+		const blobContents2 = bufferToString(buffer, "utf8");
+		assert(blobContents2 === blobContents, "failed to sync blobs");
+	});
+
+	it("New SharedTree can store handles after migration", async () => {
+		const container1 = await provider.loadContainer(runtimeFactory2);
+		const testObj1 = (await container1.getEntryPoint()) as TestDataObject;
+		const shim1 = testObj1.getTree<MigrationShim>();
+		shim1.submitMigrateOp();
+		await new Promise<void>((resolve) => shim1.on("migrated", () => resolve()));
+		await provider.ensureSynchronized();
+
+		// const blobContents = "Blob contents";
+		// const blobHandle1 = await testObj1.datastoreContext.uploadBlob(
+		// 	stringToBuffer(blobContents, "utf8"),
+		// );
+
+		const childObj1 = await testObj1.datastoreContext.containerRuntime.createDataStore(
+			blankDataObjectFactory.type,
+		);
+
+		const newTree1 = shim1.currentTree as ISharedTree;
+		const view1 = getNewTreeView(newTree1);
+		const treeNode1 = view1.root as unknown as Typed<typeof inventorySchema>;
+		// ArrayBufferLike does not have the property IFluidLoadable
+		treeNode1.quantity = 1;
+		treeNode1.handle = childObj1.entryPoint as IFluidHandle;
+
+		const container2 = await provider.loadContainer(runtimeFactory2);
+		await provider.ensureSynchronized();
+		const testObj2 = (await container2.getEntryPoint()) as TestDataObject;
+		const shim2 = testObj2.getTree<MigrationShim>();
+		const newTree2 = shim2.currentTree as ISharedTree;
+		const view2 = getNewTreeView(newTree2);
+		const treeNode2 = view2.root as unknown as Typed<typeof inventorySchema>;
+
+		// ArrayBufferLike does not have the property IFluidLoadable
+		const handle2 = treeNode2.handle as IFluidHandle<TestDataObject2>;
+		const childObj2 = await handle2.get();
+		assert(childObj2 !== undefined, "failed to sync datastore");
 	});
 });
