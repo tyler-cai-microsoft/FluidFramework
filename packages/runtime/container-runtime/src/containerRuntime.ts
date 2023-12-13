@@ -3798,7 +3798,7 @@ export class ContainerRuntime
 				throw error;
 			}
 
-			await this.closeStaleSummarizer("RefreshLatestSummaryAckFetch");
+			await this.closeStaleSummarizer();
 			return;
 		}
 
@@ -3827,7 +3827,7 @@ export class ContainerRuntime
 			readAndParseBlob,
 		);
 
-		await this.closeStaleSummarizer("RefreshLatestSummaryFromServerFetch");
+		await this.closeStaleSummarizer();
 
 		return {
 			stage: "base",
@@ -3837,7 +3837,7 @@ export class ContainerRuntime
 		};
 	}
 
-	private async closeStaleSummarizer(codePath: string): Promise<void> {
+	private async closeStaleSummarizer(): Promise<void> {
 		// Delay before restarting summarizer to prevent the summarizer from restarting too frequently.
 		await delay(this.closeSummarizerDelayMs);
 		this._summarizer?.stop("latestSummaryStateStale");
